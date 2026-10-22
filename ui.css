@@ -98,3 +98,6 @@ details label{display:flex;justify-content:space-between;align-items:center;marg
 
 .wam-notice{padding:10px 12px;border-radius:10px;background:var(--input);font-size:13.5px}
 .wam-notice.bad{background:#ea003822;color:var(--err);font-weight:500}
+
+.wam-stat{display:flex;gap:10px;flex-wrap:wrap;line-height:1.2}
+.wam-head{height:59px}

@@ -57,7 +57,7 @@
   root.id = 'wam-root';
   root.innerHTML = `
   <div id="wam-panel" hidden>
-    <div class="wam-head"><img id="wam-logo" alt=""><div class="wam-title"><b>Envíos masivos</b><span id="wam-conn">…</span><a id="wam-licstat" title="Cambiar licencia"></a></div><button id="wam-close" title="Cerrar">×</button></div>
+    <div class="wam-head"><img id="wam-logo" alt=""><div class="wam-title"><b>Envíos masivos</b><div class="wam-stat"><span id="wam-conn">…</span><a id="wam-licstat" title="Cambiar licencia"></a></div></div><button id="wam-close" title="Cerrar">×</button></div>
 
     <div id="wam-gate">
       <div class="wam-card">
