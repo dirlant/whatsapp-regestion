@@ -48,7 +48,7 @@
 
   // ---------- estado ----------
   let recipients = []; // {id, name}
-  let data = { labels: [], groups: [] };
+  let data = { labels: [] };
   let run = { state: 'idle', sent: 0, failed: 0, stop: false, paused: false };
 
   // ---------- UI ----------
@@ -63,25 +63,18 @@
       <div class="wam-card">
         <div class="wam-seg">
           <button data-d="num" class="on">Números</button>
-          <button data-d="grp">Grupos</button>
           <button data-d="lbl">Etiquetas</button>
         </div>
         <div data-ds="num">
           <textarea id="wam-nums" rows="4" placeholder="Un contacto por línea:&#10;573001234567, Ana"></textarea>
           <button id="wam-addnums" class="wam-btn">Agregar a la lista</button>
         </div>
-        <div data-ds="grp" hidden>
-          <input id="wam-gfilter" placeholder="Buscar grupo">
-          <div id="wam-glist" class="wam-list"></div>
-          <button id="wam-addgrp" class="wam-btn">Enviar a los grupos marcados</button>
-          <button id="wam-addgrpmem" class="wam-btn alt">Enviar a los miembros</button>
-        </div>
         <div data-ds="lbl" hidden>
           <div id="wam-llist" class="wam-list"></div>
-          <button id="wam-addlbl" class="wam-btn">Agregar chats de las etiquetas marcadas</button>
+          <div id="wam-lblsum" class="wam-hint"></div>
         </div>
-        <div class="wam-sum"><span id="wam-count">0 destinatarios</span>
-          <span><a id="wam-refresh" title="Recargar etiquetas y grupos">Actualizar</a> · <a id="wam-clear">Vaciar</a></span></div>
+        <div class="wam-sum"><span id="wam-count">0 contactos</span>
+          <span><a id="wam-refresh" title="Recargar etiquetas">Actualizar</a> · <a id="wam-clear">Vaciar</a></span></div>
         <div id="wam-rlist" class="wam-list small"></div>
       </div>
 
@@ -192,29 +185,56 @@
   const renderPreview = () => { $('#wam-prev').textContent = build(recipients[0] || { name: 'Ana' }); };
 
   // ---------- destinatarios ----------
-  const addRecipients = (list) => {
-    const seen = new Set(recipients.map((r) => r.id));
-    let added = 0;
-    for (const r of list) if (!seen.has(r.id)) { seen.add(r.id); recipients.push(r); added++; }
+  // recipients = contactos manuales + chats de las etiquetas marcadas (sin duplicados ni excluidos)
+  let manual = [];
+  const labelChats = new Map(); // labelId -> [{id,name}]
+  const selected = new Set(); // etiquetas marcadas
+  const excluded = new Set(); // quitados a mano con ×
+  const rebuild = () => {
+    const seen = new Set();
+    recipients = [];
+    const push = (r) => {
+      if (seen.has(r.id) || excluded.has(r.id)) return;
+      seen.add(r.id);
+      recipients.push(r);
+    };
+    manual.forEach(push);
+    selected.forEach((id) => (labelChats.get(id) || []).forEach(push));
     renderRecipients();
-    return added;
+  };
+  const addRecipients = (list) => {
+    const before = recipients.length;
+    list.forEach((r) => excluded.delete(r.id));
+    manual.push(...list);
+    rebuild();
+    return recipients.length - before;
   };
   const renderRecipients = () => {
-    $('#wam-count').textContent = `${recipients.length} destinatarios`;
+    $('#wam-count').textContent = `${recipients.length} contactos`;
+    const sum = [...selected].reduce((n, id) => n + (labelChats.get(id) || []).length, 0);
+    $('#wam-lblsum').textContent = selected.size
+      ? `${selected.size} etiqueta(s): ${sum} contactos` + (sum !== recipients.length ? ` · ${recipients.length} en total sin repetir` : '')
+      : '';
     renderPreview();
     $('#wam-rlist').innerHTML = '';
-    recipients.slice(0, 300).forEach((r, i) => {
+    recipients.slice(0, 300).forEach((r) => {
       const d = document.createElement('div');
-      d.textContent = `${r.name || ''} ${r.id.split('@')[0]}${r.id.endsWith('@g.us') ? ' (grupo)' : ''}`;
+      d.textContent = `${r.name || ''} ${r.id.split('@')[0]}`;
       const x = document.createElement('a');
       x.textContent = '×';
-      x.onclick = () => { recipients.splice(i, 1); renderRecipients(); };
+      x.onclick = () => { excluded.add(r.id); rebuild(); };
       d.prepend(x);
       $('#wam-rlist').appendChild(d);
     });
     if (recipients.length > 300) $('#wam-rlist').append(`… y ${recipients.length - 300} más`);
   };
-  $('#wam-clear').onclick = () => { recipients = []; renderRecipients(); };
+  $('#wam-clear').onclick = () => {
+    manual = [];
+    selected.clear();
+    excluded.clear();
+    $('#wam-llist').querySelectorAll('input').forEach((i) => (i.checked = false));
+    rebuild();
+  };
 
   $('#wam-addnums').onclick = () => {
     const lines = $('#wam-nums').value.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -229,25 +249,45 @@
     $('#wam-nums').value = '';
   };
 
-  const checkList = (el, items, label) => {
-    el.innerHTML = '';
-    items.forEach((it) => {
-      const l = document.createElement('label');
-      const i = document.createElement('input');
-      i.type = 'checkbox';
-      i.value = it.id;
-      const s = document.createElement('span');
-      s.textContent = label(it);
-      l.append(i, s);
-      el.appendChild(l);
-    });
-    if (!items.length) el.textContent = 'Nada encontrado.';
-  };
-  const checked = (el) => [...el.querySelectorAll('input:checked')].map((i) => i.value);
-
   const setConn = (ready) => {
     $('#wam-conn').textContent = ready ? '● listo' : '○ cargando…';
     $('#wam-conn').className = ready ? 'ok' : '';
+  };
+
+  // lista de etiquetas con contador por etiqueta; al marcar/desmarcar se recalcula el total
+  const renderLabels = () => {
+    const el = $('#wam-llist');
+    el.innerHTML = '';
+    if (!data.labels.length) { el.textContent = 'No hay etiquetas (requiere WhatsApp Business).'; return; }
+    data.labels.forEach((lb) => {
+      const l = document.createElement('label');
+      const i = document.createElement('input');
+      i.type = 'checkbox';
+      i.value = lb.id;
+      i.checked = selected.has(lb.id);
+      i.onchange = () => { i.checked ? selected.add(lb.id) : selected.delete(lb.id); rebuild(); };
+      const s = document.createElement('span');
+      s.textContent = lb.name;
+      const n = document.createElement('em');
+      n.id = 'wam-n-' + lb.id;
+      n.textContent = labelChats.has(lb.id) ? labelChats.get(lb.id).length : '…';
+      l.append(i, s, n);
+      el.appendChild(l);
+    });
+  };
+  const loadLabelCounts = async () => {
+    for (const lb of data.labels) {
+      try {
+        const chats = (await call('chatsByLabel', { labelId: lb.id })).filter((c) => !c.isGroup);
+        labelChats.set(lb.id, chats.map((c) => ({ id: c.id, name: c.name })));
+      } catch (e) {
+        labelChats.set(lb.id, []);
+        log(`Etiqueta ${lb.name}: ${e.message}`, 'err');
+      }
+      const n = document.getElementById('wam-n-' + lb.id);
+      if (n) n.textContent = labelChats.get(lb.id).length;
+      if (selected.has(lb.id)) rebuild();
+    }
   };
   const refreshData = async () => {
     try {
@@ -255,43 +295,15 @@
       setConn(st.ready);
       if (!st.ready) return;
       data = await call('getData');
-      renderGroups();
-      checkList($('#wam-llist'), data.labels, (l) => l.name);
-      if (!data.labels.length) $('#wam-llist').textContent = 'No hay etiquetas (requiere WhatsApp Business).';
+      labelChats.clear();
+      renderLabels();
+      loadLabelCounts();
     } catch (e) {
       log('Error leyendo datos: ' + e.message, 'err');
-      $('#wam-glist').textContent = $('#wam-llist').textContent = 'Error: ' + e.message;
+      $('#wam-llist').textContent = 'Error: ' + e.message;
     }
   };
-  const renderGroups = () => {
-    const f = $('#wam-gfilter').value.toLowerCase();
-    const keep = new Set(checked($('#wam-glist')));
-    checkList($('#wam-glist'), data.groups.filter((g) => g.name.toLowerCase().includes(f)), (g) => `${g.name} (${g.size})`);
-    $('#wam-glist').querySelectorAll('input').forEach((i) => (i.checked = keep.has(i.value)));
-  };
-  $('#wam-gfilter').oninput = renderGroups;
   $('#wam-refresh').onclick = refreshData;
-
-  $('#wam-addgrp').onclick = () => {
-    const ids = new Set(checked($('#wam-glist')));
-    log(`Agregados ${addRecipients(data.groups.filter((g) => ids.has(g.id)).map((g) => ({ id: g.id, name: g.name })))} grupos`);
-  };
-  $('#wam-addgrpmem').onclick = async () => {
-    let total = 0;
-    for (const id of checked($('#wam-glist'))) {
-      try { total += addRecipients(await call('groupParticipants', { groupId: id })); }
-      catch (e) { log(`Grupo ${id}: ${e.message}`, 'err'); }
-    }
-    log(`Agregados ${total} miembros`);
-  };
-  $('#wam-addlbl').onclick = async () => {
-    let total = 0;
-    for (const id of checked($('#wam-llist'))) {
-      try { total += addRecipients(await call('chatsByLabel', { labelId: id })); }
-      catch (e) { log(`Etiqueta ${id}: ${e.message}`, 'err'); }
-    }
-    log(`Agregados ${total} chats por etiqueta`);
-  };
 
   // ---------- envío ----------
   const fmt = (s) => { s = Math.round(s); return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`; };

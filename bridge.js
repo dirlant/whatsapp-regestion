@@ -22,18 +22,7 @@
           labels = WPP.whatsapp.LabelStore.getModelsArray().map((l) => ({ id: String(l.id), name: l.name, color: l.hexColor }));
         } catch {}
       }
-      let chats;
-      try {
-        chats = await WPP.chat.list({ onlyGroups: true });
-      } catch (e) {
-        chats = WPP.whatsapp.ChatStore.getModelsArray().filter((c) => c.isGroup);
-      }
-      const groups = chats.map((c) => ({
-        id: toId(c.id),
-        name: c.name || c.formattedTitle || toId(c.id),
-        size: c.groupMetadata?.participants?.length ?? 0,
-      }));
-      return { labels, groups };
+      return { labels };
     },
 
     // Chats (individuales y grupos) que tienen una etiqueta
@@ -43,14 +32,6 @@
         id: toId(c.id),
         name: c.name || c.formattedTitle || c.contact?.pushname || toId(c.id).split('@')[0],
         isGroup: !!c.isGroup,
-      }));
-    },
-
-    async groupParticipants({ groupId }) {
-      const ps = await WPP.group.getParticipants(groupId);
-      return ps.map((p) => ({
-        id: toId(p.id),
-        name: p.contact?.name || p.contact?.pushname || toId(p.id).split('@')[0],
       }));
     },
 
