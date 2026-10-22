@@ -62,6 +62,7 @@
     <div class="wam-tabbar wam-seg">
       <button data-tab="env" class="on">Envío</button>
       <button data-tab="msg">Mensajes</button>
+      <button data-tab="met">Métricas</button>
     </div>
 
     <div class="wam-body" data-body="env">
@@ -112,6 +113,29 @@
       </div>
     </div>
 
+    <div class="wam-body" data-body="met" hidden>
+      <h4>Resumen</h4>
+      <div class="wam-card">
+        <div class="wam-kpis">
+          <div><b id="k-today">0</b><span>Enviados hoy</span></div>
+          <div><b id="k-total">0</b><span>Enviados en total</span></div>
+          <div><b id="k-fail">0</b><span>Fallidos</span></div>
+          <div><b id="k-rate">–</b><span>Éxito</span></div>
+          <div><b id="k-gap">–</b><span>Intervalo típico</span></div>
+          <div><b id="k-hour">–</b><span>Por hora</span></div>
+        </div>
+      </div>
+      <h4>Últimos 7 días</h4>
+      <div class="wam-card"><div id="wam-chart" class="wam-chart"></div></div>
+      <h4>Uso por mensaje</h4>
+      <div class="wam-card" id="wam-bymsg"></div>
+      <h4>Historial reciente</h4>
+      <div class="wam-card">
+        <div id="wam-hist" class="wam-list small"></div>
+        <button id="wam-clearmet" class="wam-btn alt danger">Borrar métricas</button>
+      </div>
+    </div>
+
     <div class="wam-foot">
       <button id="wam-start" class="wam-btn big">Iniciar envío</button>
       <button id="wam-pause" class="wam-btn alt">Pausar</button>
@@ -127,6 +151,7 @@
     b.onclick = () => {
       panel.querySelectorAll('.wam-tabbar button').forEach((x) => x.classList.toggle('on', x === b));
       panel.querySelectorAll('[data-body]').forEach((d) => (d.hidden = d.dataset.body !== b.dataset.tab));
+      if (b.dataset.tab === 'met') renderMetrics();
     };
   });
   chrome.runtime.onMessage.addListener((m) => {
@@ -202,7 +227,7 @@
   let lastMsg = -1;
   const pickMsg = () => {
     const a = activeMsgs();
-    if (a.length <= 1) return a[0] || '';
+    if (a.length <= 1) { lastMsg = 0; return a[0] || ''; }
     let i;
     do { i = Math.floor(Math.random() * a.length); } while (i === lastMsg); // nunca el mismo dos veces seguidas
     lastMsg = i;
@@ -327,6 +352,89 @@
   };
   $('#wam-refresh').onclick = refreshData;
 
+  // ---------- métricas (historial persistente en el almacenamiento de la extensión) ----------
+  const MAX_LOG = 5000;
+  let sendLog = []; // {t, ok, id, name, m (índice de mensaje), err}
+  const record = (e) => {
+    sendLog.push({ t: Date.now(), ...e });
+    if (sendLog.length > MAX_LOG) sendLog = sendLog.slice(-MAX_LOG);
+    chrome.storage.local.set({ wamLog: sendLog });
+    if (!$('[data-body="met"]').hidden) renderMetrics();
+  };
+  const dayKey = (t) => { const d = new Date(t); return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); };
+  const renderMetrics = () => {
+    const oks = sendLog.filter((e) => e.ok);
+    const fails = sendLog.length - oks.length;
+    const today = dayKey(Date.now());
+    $('#k-today').textContent = oks.filter((e) => dayKey(e.t) === today).length;
+    $('#k-total').textContent = oks.length;
+    $('#k-fail').textContent = fails;
+    $('#k-rate').textContent = sendLog.length ? Math.round((oks.length / sendLog.length) * 100) + '%' : '–';
+
+    // intervalo típico (mediana) y ritmo por hora, solo entre envíos seguidos
+    const gaps = [];
+    for (let i = 1; i < oks.length; i++) {
+      const g = (oks[i].t - oks[i - 1].t) / 1000;
+      if (g < 300) gaps.push(g);
+    }
+    gaps.sort((a, b) => a - b);
+    $('#k-gap').textContent = gaps.length ? fmt(gaps[Math.floor(gaps.length / 2)]) : '–';
+    const span = gaps.reduce((a, b) => a + b, 0);
+    $('#k-hour').textContent = span > 60 ? Math.round((gaps.length / span) * 3600) : '–';
+
+    // últimos 7 días
+    const days = [];
+    for (let i = 6; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); days.push(d); }
+    const counts = days.map((d) => oks.filter((e) => dayKey(e.t) === dayKey(d)).length);
+    const max = Math.max(1, ...counts);
+    const chart = $('#wam-chart');
+    chart.innerHTML = '';
+    days.forEach((d, i) => {
+      const col = document.createElement('div');
+      col.innerHTML = '<em></em><i></i><span></span>';
+      col.querySelector('em').textContent = counts[i] || '';
+      col.querySelector('i').style.height = (counts[i] / max) * 80 + '%';
+      col.querySelector('span').textContent = d.toLocaleDateString('es', { weekday: 'short' }).slice(0, 3);
+      chart.appendChild(col);
+    });
+
+    // uso por mensaje
+    const by = {};
+    oks.forEach((e) => { if (e.m != null) by[e.m] = (by[e.m] || 0) + 1; });
+    const box = $('#wam-bymsg');
+    box.innerHTML = '';
+    const keys = Object.keys(by).sort((a, b) => a - b);
+    if (!keys.length) box.textContent = 'Aún no hay envíos.';
+    const bmax = Math.max(1, ...Object.values(by));
+    keys.forEach((k) => {
+      const row = document.createElement('div');
+      row.className = 'wam-bar-row';
+      row.innerHTML = '<span></span><div class="wam-bar"><div></div></div><em></em>';
+      row.querySelector('span').textContent = 'Mensaje ' + (+k + 1);
+      row.querySelector('.wam-bar > div').style.width = (by[k] / bmax) * 100 + '%';
+      row.querySelector('em').textContent = by[k];
+      box.appendChild(row);
+    });
+
+    // historial
+    const hist = $('#wam-hist');
+    hist.innerHTML = '';
+    sendLog.slice(-40).reverse().forEach((e) => {
+      const d = document.createElement('div');
+      const when = new Date(e.t).toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+      d.textContent = (e.ok ? '✓ ' : '✗ ') + when + ' · ' + (e.name || String(e.id).split('@')[0]) + (e.ok ? '' : ' · ' + e.err);
+      if (!e.ok) d.style.color = 'var(--err)';
+      hist.appendChild(d);
+    });
+    if (!sendLog.length) hist.textContent = 'Sin historial.';
+  };
+  $('#wam-clearmet').onclick = () => {
+    if (!confirm('¿Borrar todo el historial de métricas?')) return;
+    sendLog = [];
+    chrome.storage.local.set({ wamLog: [] });
+    renderMetrics();
+  };
+
   // ---------- envío ----------
   const fmt = (s) => { s = Math.round(s); return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`; };
 
@@ -398,6 +506,7 @@
       if (run.stop) break;
 
       const text = build(r);
+      const msgIdx = lastMsg;
       const who = r.name || r.id.split('@')[0];
       try {
         let to = r.id;
@@ -409,9 +518,11 @@
         setStats(`Enviando a ${who}…`);
         await call('send', { to, text, typingMs: typingMs(text) });
         run.sent++; sinceBreak++; consecErr = 0;
+        record({ ok: true, id: r.id, name: r.name, m: msgIdx });
         log(`✓ ${who}`, 'ok');
       } catch (e) {
         run.failed++; consecErr++;
+        record({ ok: false, id: r.id, name: r.name, err: e.message });
         log(`✗ ${who}: ${e.message}`, 'err');
         if (consecErr >= cfg.maxErrors) { log(`Detenido: ${consecErr} errores seguidos`, 'err'); break; }
       }
@@ -432,6 +543,7 @@
   $('#wam-stop').onclick = () => { run.stop = true; run.paused = false; $('#wam-pause').textContent = 'Pausar'; };
 
   // ---------- init ----------
+  chrome.storage.local.get('wamLog').then(({ wamLog }) => { if (Array.isArray(wamLog)) sendLog = wamLog; });
   chrome.storage.local.get('wamCfg').then(({ wamCfg }) => {
     cfg = { ...DEFAULTS, ...(wamCfg || {}) };
     if (wamCfg && wamCfg.message && !wamCfg.messages) cfg.messages = [wamCfg.message]; // versión anterior
