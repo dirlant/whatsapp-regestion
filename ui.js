@@ -129,6 +129,9 @@
   const panel = $('#wam-panel');
   $('#wam-fab').onclick = () => { panel.hidden = !panel.hidden; if (!panel.hidden) refreshData(); };
   $('#wam-close').onclick = () => (panel.hidden = true);
+  chrome.runtime.onMessage.addListener((m) => {
+    if (m && m.type === 'wam-toggle') { panel.hidden = !panel.hidden; if (!panel.hidden) refreshData(); }
+  });
 
   // pestañas principales
   panel.querySelectorAll('.wam-tabs button').forEach((b) => {
