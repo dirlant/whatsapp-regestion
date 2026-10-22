@@ -56,72 +56,72 @@
   root.id = 'wam-root';
   root.innerHTML = `
   <div id="wam-panel" hidden>
-    <div class="wam-head"><img id="wam-logo" alt=""><b>Envíos masivos</b><span id="wam-conn">…</span><button id="wam-close">×</button></div>
-    <div class="wam-tabs">
-      <button data-t="dest" class="on">Destinatarios</button>
-      <button data-t="msg">Mensaje</button>
-      <button data-t="vel">Velocidad</button>
-      <button data-t="env">Enviar</button>
+    <div class="wam-head"><img id="wam-logo" alt=""><div class="wam-title"><b>Envíos masivos</b><span id="wam-conn">…</span></div><button id="wam-close" title="Cerrar">×</button></div>
+
+    <div class="wam-body">
+      <h4>Destinatarios</h4>
+      <div class="wam-card">
+        <div class="wam-seg">
+          <button data-d="num" class="on">Números</button>
+          <button data-d="grp">Grupos</button>
+          <button data-d="lbl">Etiquetas</button>
+        </div>
+        <div data-ds="num">
+          <textarea id="wam-nums" rows="4" placeholder="Un contacto por línea:&#10;573001234567, Ana"></textarea>
+          <button id="wam-addnums" class="wam-btn">Agregar a la lista</button>
+        </div>
+        <div data-ds="grp" hidden>
+          <input id="wam-gfilter" placeholder="Buscar grupo">
+          <div id="wam-glist" class="wam-list"></div>
+          <button id="wam-addgrp" class="wam-btn">Enviar a los grupos marcados</button>
+          <button id="wam-addgrpmem" class="wam-btn alt">Enviar a los miembros</button>
+        </div>
+        <div data-ds="lbl" hidden>
+          <div id="wam-llist" class="wam-list"></div>
+          <button id="wam-addlbl" class="wam-btn">Agregar chats de las etiquetas marcadas</button>
+        </div>
+        <div class="wam-sum"><span id="wam-count">0 destinatarios</span>
+          <span><a id="wam-refresh" title="Recargar etiquetas y grupos">Actualizar</a> · <a id="wam-clear">Vaciar</a></span></div>
+        <div id="wam-rlist" class="wam-list small"></div>
+      </div>
+
+      <h4>Mensaje</h4>
+      <div class="wam-card">
+        <textarea id="wam-msg" rows="4"></textarea>
+        <p class="wam-hint"><code>{nombre}</code> nombre del contacto · <code>{Hola|Buenas}</code> variante al azar</p>
+        <div class="wam-prev" id="wam-prev"></div>
+      </div>
+
+      <h4>Velocidad</h4>
+      <div class="wam-card">
+        <div class="wam-seg" id="wam-presets">
+          <button data-p="seguro">Seguro</button><button data-p="normal">Normal</button><button data-p="rapido">Rápido</button>
+        </div>
+        <label class="wam-sw"><span>Simular "escribiendo…"</span><input type="checkbox" id="typing"><i></i></label>
+        <label class="wam-sw"><span>Variación humana</span><input type="checkbox" id="jitter"><i></i></label>
+        <details>
+          <summary>Ajustes avanzados</summary>
+          <label>Intervalo (seg) <span><input type="number" id="minDelay" min="1"> – <input type="number" id="maxDelay" min="1"></span></label>
+          <label>Pausa cada (mensajes) <span><input type="number" id="batchMin" min="1"> – <input type="number" id="batchMax" min="1"></span></label>
+          <label>Duración pausa (min) <span><input type="number" id="pauseMin" min="1"> – <input type="number" id="pauseMax" min="1"></span></label>
+          <label>Límite por sesión <span><input type="number" id="dailyLimit" min="1"></span></label>
+          <label>Parar tras errores seguidos <span><input type="number" id="maxErrors" min="1"></span></label>
+        </details>
+      </div>
+
+      <h4>Progreso</h4>
+      <div class="wam-card">
+        <div id="wam-stats">Listo.</div>
+        <div class="wam-bar"><div id="wam-barfill"></div></div>
+        <div id="wam-log"></div>
+      </div>
     </div>
 
-    <section data-s="dest">
-      <div class="wam-sub">
-        <button data-d="num" class="on">Números</button>
-        <button data-d="grp">Grupos</button>
-        <button data-d="lbl">Etiquetas</button>
-        <button id="wam-refresh" title="Recargar etiquetas y grupos">↻</button>
-      </div>
-      <div data-ds="num">
-        <textarea id="wam-nums" rows="6" placeholder="Un contacto por línea:&#10;573001234567, Ana&#10;573009876543"></textarea>
-        <button id="wam-addnums">Agregar a la lista</button>
-      </div>
-      <div data-ds="grp" hidden>
-        <input id="wam-gfilter" placeholder="Filtrar grupos…">
-        <div id="wam-glist" class="wam-list"></div>
-        <button id="wam-addgrp">Enviar a los grupos marcados</button>
-        <button id="wam-addgrpmem">Enviar a los miembros de los marcados</button>
-      </div>
-      <div data-ds="lbl" hidden>
-        <div id="wam-llist" class="wam-list"></div>
-        <button id="wam-addlbl">Agregar chats de las etiquetas marcadas</button>
-      </div>
-      <div class="wam-sum"><span id="wam-count">0 destinatarios</span>
-        <button id="wam-clear">Vaciar</button></div>
-      <div id="wam-rlist" class="wam-list small"></div>
-    </section>
-
-    <section data-s="msg" hidden>
-      <textarea id="wam-msg" rows="9"></textarea>
-      <p class="wam-hint"><code>{nombre}</code> = nombre del contacto.<br>
-      <code>{Hola|Buenas|Qué tal}</code> = variante al azar (evita mensajes idénticos).</p>
-      <div class="wam-prev"><b>Vista previa:</b><div id="wam-prev"></div></div>
-    </section>
-
-    <section data-s="vel" hidden>
-      <div class="wam-sub">
-        <button data-p="seguro">Seguro</button><button data-p="normal">Normal</button><button data-p="rapido">Rápido</button>
-      </div>
-      <label>Intervalo entre mensajes (seg) <span><input type="number" id="minDelay" min="1"> a <input type="number" id="maxDelay" min="1"></span></label>
-      <label>Pausa cada N mensajes <span><input type="number" id="batchMin" min="1"> a <input type="number" id="batchMax" min="1"></span></label>
-      <label>Duración de la pausa (min) <span><input type="number" id="pauseMin" min="1"> a <input type="number" id="pauseMax" min="1"></span></label>
-      <label>Límite por sesión <span><input type="number" id="dailyLimit" min="1"></span></label>
-      <label>Detener tras errores seguidos <span><input type="number" id="maxErrors" min="1"></span></label>
-      <label class="chk"><input type="checkbox" id="typing"> Simular "escribiendo…" según el largo del texto</label>
-      <label class="chk"><input type="checkbox" id="jitter"> Variación humana (a veces tarda más)</label>
-      <p class="wam-hint">Cada intervalo es aleatorio dentro del rango; las pausas ocurren tras un número aleatorio de mensajes.</p>
-    </section>
-
-    <section data-s="env" hidden>
-      <div id="wam-stats">Listo.</div>
-      <div class="wam-bar"><div id="wam-barfill"></div></div>
-      <div class="wam-row">
-        <button id="wam-start" class="pri">Iniciar</button>
-        <button id="wam-pause">Pausar</button>
-        <button id="wam-stop">Detener</button>
-      </div>
-      <p class="wam-hint">Mantén esta pestaña abierta mientras se envía.</p>
-      <div id="wam-log"></div>
-    </section>
+    <div class="wam-foot">
+      <button id="wam-start" class="wam-btn big">Iniciar envío</button>
+      <button id="wam-pause" class="wam-btn alt">Pausar</button>
+      <button id="wam-stop" class="wam-btn alt danger">Detener</button>
+    </div>
   </div>`;
   document.documentElement.appendChild(root);
 
@@ -132,18 +132,10 @@
     if (m && m.type === 'wam-toggle') { panel.hidden = !panel.hidden; if (!panel.hidden) refreshData(); }
   });
 
-  // pestañas principales
-  panel.querySelectorAll('.wam-tabs button').forEach((b) => {
+  // selector Números / Grupos / Etiquetas
+  panel.querySelectorAll('.wam-seg button[data-d]').forEach((b) => {
     b.onclick = () => {
-      panel.querySelectorAll('.wam-tabs button').forEach((x) => x.classList.toggle('on', x === b));
-      panel.querySelectorAll('section').forEach((s) => (s.hidden = s.dataset.s !== b.dataset.t));
-      if (b.dataset.t === 'msg') renderPreview();
-    };
-  });
-  // sub-pestañas de destinatarios
-  panel.querySelectorAll('.wam-sub button[data-d]').forEach((b) => {
-    b.onclick = () => {
-      panel.querySelectorAll('.wam-sub button[data-d]').forEach((x) => x.classList.toggle('on', x === b));
+      panel.querySelectorAll('.wam-seg button[data-d]').forEach((x) => x.classList.toggle('on', x === b));
       panel.querySelectorAll('[data-ds]').forEach((s) => (s.hidden = s.dataset.ds !== b.dataset.d));
     };
   });
@@ -164,8 +156,15 @@
     numFields.forEach((k) => ($('#' + k).value = cfg[k]));
     boolFields.forEach((k) => ($('#' + k).checked = cfg[k]));
     $('#wam-msg').value = cfg.message;
+    markPreset();
   };
-  numFields.forEach((k) => ($('#' + k).onchange = (e) => { cfg[k] = Math.max(1, +e.target.value || 1); save(); }));
+  const markPreset = () => {
+    panel.querySelectorAll('[data-p]').forEach((b) => {
+      const p = PRESETS[b.dataset.p];
+      b.classList.toggle('on', Object.keys(p).every((k) => cfg[k] === p[k]));
+    });
+  };
+  numFields.forEach((k) => ($('#' + k).onchange = (e) => { cfg[k] = Math.max(1, +e.target.value || 1); save(); markPreset(); }));
   boolFields.forEach((k) => ($('#' + k).onchange = (e) => { cfg[k] = e.target.checked; save(); }));
   $('#wam-msg').oninput = (e) => { cfg.message = e.target.value; save(); renderPreview(); };
   panel.querySelectorAll('[data-p]').forEach((b) => (b.onclick = () => {
@@ -202,6 +201,7 @@
   };
   const renderRecipients = () => {
     $('#wam-count').textContent = `${recipients.length} destinatarios`;
+    renderPreview();
     $('#wam-rlist').innerHTML = '';
     recipients.slice(0, 300).forEach((r, i) => {
       const d = document.createElement('div');
