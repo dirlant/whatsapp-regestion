@@ -59,7 +59,12 @@
   <div id="wam-panel" hidden>
     <div class="wam-head"><img id="wam-logo" alt=""><div class="wam-title"><b>Envíos masivos</b><span id="wam-conn">…</span></div><button id="wam-close" title="Cerrar">×</button></div>
 
-    <div class="wam-body">
+    <div class="wam-tabbar wam-seg">
+      <button data-tab="env" class="on">Envío</button>
+      <button data-tab="msg">Mensajes</button>
+    </div>
+
+    <div class="wam-body" data-body="env">
       <h4>Etiquetas</h4>
       <div class="wam-card">
         <div>
@@ -69,14 +74,6 @@
         <div class="wam-sum"><span id="wam-count">0 contactos</span>
           <span><a id="wam-refresh" title="Recargar etiquetas">Actualizar</a> · <a id="wam-clear">Vaciar</a></span></div>
         <div id="wam-rlist" class="wam-list small"></div>
-      </div>
-
-      <h4>Mensaje</h4>
-      <div class="wam-card">
-        <div id="wam-msgs"></div>
-        <button id="wam-addmsg" class="wam-btn alt">+ Agregar otro mensaje</button>
-        <p class="wam-hint">Cada envío elige un mensaje al azar (hasta 10). <code>{nombre}</code> = nombre del contacto · <code>{Hola|Buenas}</code> = variante al azar</p>
-        <div class="wam-prev" id="wam-prev"></div>
       </div>
 
       <h4>Velocidad</h4>
@@ -105,6 +102,16 @@
       </div>
     </div>
 
+    <div class="wam-body" data-body="msg" hidden>
+      <h4>Mensajes (hasta 10)</h4>
+      <div class="wam-card">
+        <div id="wam-msgs"></div>
+        <button id="wam-addmsg" class="wam-btn alt">+ Agregar otro mensaje</button>
+        <p class="wam-hint">Cada envío elige un mensaje al azar (hasta 10). <code>{nombre}</code> = nombre del contacto · <code>{Hola|Buenas}</code> = variante al azar</p>
+        <div class="wam-prev" id="wam-prev"></div>
+      </div>
+    </div>
+
     <div class="wam-foot">
       <button id="wam-start" class="wam-btn big">Iniciar envío</button>
       <button id="wam-pause" class="wam-btn alt">Pausar</button>
@@ -116,6 +123,12 @@
   const panel = $('#wam-panel');
   $('#wam-logo').src = chrome.runtime.getURL('icons/icon48.png');
   $('#wam-close').onclick = () => (panel.hidden = true);
+  panel.querySelectorAll('.wam-tabbar button').forEach((b) => {
+    b.onclick = () => {
+      panel.querySelectorAll('.wam-tabbar button').forEach((x) => x.classList.toggle('on', x === b));
+      panel.querySelectorAll('[data-body]').forEach((d) => (d.hidden = d.dataset.body !== b.dataset.tab));
+    };
+  });
   chrome.runtime.onMessage.addListener((m) => {
     if (m && m.type === 'wam-toggle') { panel.hidden = !panel.hidden; if (!panel.hidden) refreshData(); }
   });

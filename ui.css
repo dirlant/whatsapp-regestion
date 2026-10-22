@@ -73,3 +73,5 @@ details label{display:flex;justify-content:space-between;align-items:center;marg
 .wam-msg{position:relative;margin-bottom:8px}
 .wam-msg textarea{padding-right:30px!important}
 .wam-msg a{position:absolute;top:6px;right:10px;color:var(--err);cursor:pointer;font-size:18px}
+.wam-tabbar{margin:10px 14px 0;flex:0 0 auto}
+.wam-tabbar button{font-size:14px;padding:7px 4px}
