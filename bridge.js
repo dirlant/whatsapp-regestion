@@ -14,12 +14,21 @@
     },
 
     async getData() {
-      const labels = (await WPP.labels.getAllLabels().catch(() => [])).map((l) => ({
-        id: String(l.id),
-        name: l.name,
-        color: l.hexColor,
-      }));
-      const groups = (await WPP.chat.list({ onlyGroups: true })).map((c) => ({
+      let labels = [];
+      try {
+        labels = (await WPP.labels.getAllLabels()).map((l) => ({ id: String(l.id), name: l.name, color: l.hexColor }));
+      } catch (e) {
+        try {
+          labels = WPP.whatsapp.LabelStore.getModelsArray().map((l) => ({ id: String(l.id), name: l.name, color: l.hexColor }));
+        } catch {}
+      }
+      let chats;
+      try {
+        chats = await WPP.chat.list({ onlyGroups: true });
+      } catch (e) {
+        chats = WPP.whatsapp.ChatStore.getModelsArray().filter((c) => c.isGroup);
+      }
+      const groups = chats.map((c) => ({
         id: toId(c.id),
         name: c.name || c.formattedTitle || toId(c.id),
         size: c.groupMetadata?.participants?.length ?? 0,

@@ -258,7 +258,10 @@
       renderGroups();
       checkList($('#wam-llist'), data.labels, (l) => l.name);
       if (!data.labels.length) $('#wam-llist').textContent = 'No hay etiquetas (requiere WhatsApp Business).';
-    } catch (e) { log('Error leyendo datos: ' + e.message, 'err'); }
+    } catch (e) {
+      log('Error leyendo datos: ' + e.message, 'err');
+      $('#wam-glist').textContent = $('#wam-llist').textContent = 'Error: ' + e.message;
+    }
   };
   const renderGroups = () => {
     const f = $('#wam-gfilter').value.toLowerCase();
@@ -391,7 +394,7 @@
     try {
       const st = await call('status');
       setConn(st.ready);
-      if (st.ready) clearInterval(poll);
+      if (st.ready) { clearInterval(poll); refreshData(); }
     } catch {}
   }, 2000);
 })();
