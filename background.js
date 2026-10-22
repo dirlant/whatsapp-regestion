@@ -20,7 +20,7 @@ chrome.action.onClicked.addListener(async (tab) => {
 });
 
 // Validación de licencia: POST /api/licencia-whatsapp { token, numero }
-const LICENSE_URL = 'https://api-agendaconmigo.vercel.app/api/licencia-whatsapp';
+const LICENSE_URL = 'https://agendaconmigo-api.vercel.app/api/licencia-whatsapp';
 chrome.runtime.onMessage.addListener((msg, _sender, send) => {
   if (!msg || msg.type !== 'wam-license') return;
   fetch(LICENSE_URL, {

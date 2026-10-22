@@ -9,7 +9,7 @@
   ],
   "host_permissions": [
     "https://web.whatsapp.com/*",
-    "https://api-agendaconmigo.vercel.app/*"
+    "https://agendaconmigo-api.vercel.app/*"
   ],
   "icons": {
     "16": "icons/icon16.png",
