@@ -10,7 +10,14 @@
 
   const actions = {
     async status() {
-      return { ready: ready() };
+      const w = window.WPP;
+      return {
+        ready: ready(),
+        hasWPP: !!w,
+        isReady: !!(w && w.isReady),
+        isFullReady: !!(w && w.isFullReady),
+        version: (w && w.version) || '',
+      };
     },
 
     // número de la cuenta que tiene abierta WhatsApp Web (solo dígitos)
@@ -64,7 +71,7 @@
     const m = ev.data;
     if (ev.source !== window || !m || m.tag !== TAG || m.dir !== 'req') return;
     try {
-      if (m.action !== 'status' && !ready()) throw new Error('WhatsApp aún no está listo');
+      if (m.action !== 'status' && m.action !== 'me' && !ready()) throw new Error('WhatsApp aún no está listo');
       reply(m.id, true, await actions[m.action](m.payload || {}));
     } catch (e) {
       reply(m.id, false, e?.message || String(e));

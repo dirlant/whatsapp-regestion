@@ -95,3 +95,6 @@ details label{display:flex;justify-content:space-between;align-items:center;marg
 #wam-licstat{font-size:12px;cursor:pointer}
 #wam-licstat.ok{color:var(--green)}#wam-licstat.bad{color:var(--err)}
 .wam-btn:disabled{opacity:.45;cursor:not-allowed}
+
+.wam-notice{padding:10px 12px;border-radius:10px;background:var(--input);font-size:13.5px}
+.wam-notice.bad{background:#ea003822;color:var(--err);font-weight:500}

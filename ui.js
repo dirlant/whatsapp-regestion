@@ -62,11 +62,12 @@
     <div id="wam-gate">
       <div class="wam-card">
         <b>Activar licencia</b>
-        <p class="wam-hint" id="wam-gate-msg">Ingresa el token de tu licencia.</p>
         <input id="wam-token" placeholder="Token de licencia" autocomplete="off">
         <p class="wam-hint">Número de WhatsApp detectado: <b id="wam-num">…</b></p>
         <button id="wam-activate" class="wam-btn">Activar</button>
         <button id="wam-gate-close" class="wam-btn alt" hidden>Cerrar</button>
+        <div id="wam-gate-msg" class="wam-notice">Ingresa el token de tu licencia.</div>
+        <div id="wam-gate-detail" class="wam-hint"></div>
       </div>
     </div>
 
@@ -455,7 +456,7 @@
   };
   const GRACE_MS = 24 * 3600 * 1000; // sin conexión: se tolera hasta 24 h desde la última verificación correcta
   const todayStr = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
-  let lic = { token: '', valid: false, until: '', number: '', checkedAt: 0, reason: '', checking: false };
+  let lic = { token: '', valid: false, until: '', number: '', checkedAt: 0, reason: '', detail: '', checking: false };
   let gateOpen = false;
   const saveLic = () => chrome.storage.local.set({ wamLic: { token: lic.token, valid: lic.valid, until: lic.until, number: lic.number, checkedAt: lic.checkedAt } });
 
@@ -465,7 +466,9 @@
     st.className = lic.valid ? 'ok' : 'bad';
     $('#wam-num').textContent = lic.number ? '+' + lic.number : 'no disponible aún';
     if (!$('#wam-token').value) $('#wam-token').value = lic.token;
-    $('#wam-gate-msg').textContent = lic.reason || 'Ingresa el token de tu licencia.';
+    $('#wam-gate-msg').textContent = lic.checking ? 'Verificando licencia…' : lic.reason || 'Ingresa el token de tu licencia.';
+    $('#wam-gate-msg').className = 'wam-notice' + (lic.reason && !lic.checking ? ' bad' : '');
+    $('#wam-gate-detail').textContent = lic.detail || '';
     $('#wam-gate').hidden = lic.valid && !gateOpen;
     $('#wam-gate-close').hidden = !lic.valid;
     $('#wam-start').disabled = !lic.valid;
@@ -476,15 +479,30 @@
   const fetchLicense = (token, numero) =>
     new Promise((resolve) => chrome.runtime.sendMessage({ type: 'wam-license', token, numero }, (r) => resolve(r || { error: chrome.runtime.lastError?.message || 'sin respuesta' })));
 
+  // Número de la cuenta abierta: primero de los datos de sesión de WhatsApp Web, luego de WPP
+  const myNumber = async () => {
+    for (const k of ['last-wid-md', 'last-wid']) {
+      try {
+        const raw = String(localStorage.getItem(k) || '').replace(/"/g, '');
+        const n = raw.split('@')[0].split(':')[0].replace(/\D/g, '');
+        if (n.length >= 8) return n;
+      } catch {}
+    }
+    try { return (await call('me')).number || ''; } catch { return ''; }
+  };
+
   // Verifica la licencia contra la API. Devuelve true si se puede usar la extensión.
   const checkLicense = async () => {
     if (!lic.token) { lic.valid = false; lic.reason = ''; renderLic(); return false; }
     lic.checking = true; renderLic();
     try {
-      const me = await call('me').catch(() => ({ number: '' }));
-      if (!me.number) { lic.reason = 'Esperando a que WhatsApp Web cargue…'; lic.valid = false; return false; }
+      const me = { number: await myNumber() };
+      if (!me.number) { lic.reason = 'No se pudo leer tu número de WhatsApp. Inicia sesión en WhatsApp Web y recarga la página.'; lic.valid = false; return false; }
       lic.number = me.number;
       const r = await fetchLicense(lic.token, lic.number);
+      lic.detail = r.error
+        ? 'Error de conexión: ' + r.error
+        : 'Respuesta del servidor: HTTP ' + r.status + (r.data && r.data.motivo ? ' · ' + r.data.motivo : '') + (r.data && r.data.valida ? ' · válida' : '');
       if (r.status === 200 && r.data) {
         if (r.data.valida) {
           lic.valid = true; lic.until = r.data.fecha_vencimiento || ''; lic.reason = ''; lic.checkedAt = Date.now();
@@ -640,11 +658,17 @@
     syncFields();
     renderPreview();
   });
+  const t0 = Date.now();
+  let diagShown = false;
   const poll = setInterval(async () => {
     try {
       const st = await call('status');
       setConn(st.ready);
       if (st.ready) { clearInterval(poll); refreshData(); checkLicense(); }
+      else if (!diagShown && Date.now() - t0 > 25000) {
+        diagShown = true;
+        log(`WhatsApp no termina de cargar la librería interna (WPP=${st.hasWPP}, isReady=${st.isReady}, isFullReady=${st.isFullReady}). Recarga la página con Ctrl+Shift+R.`, 'err');
+      }
     } catch {}
   }, 2000);
 })();
