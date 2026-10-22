@@ -55,9 +55,8 @@
   const root = document.createElement('div');
   root.id = 'wam-root';
   root.innerHTML = `
-  <button id="wam-fab" title="Envíos masivos">✉</button>
   <div id="wam-panel" hidden>
-    <div class="wam-head"><b>Envíos masivos</b><span id="wam-conn">…</span><button id="wam-close">×</button></div>
+    <div class="wam-head"><img id="wam-logo" alt=""><b>Envíos masivos</b><span id="wam-conn">…</span><button id="wam-close">×</button></div>
     <div class="wam-tabs">
       <button data-t="dest" class="on">Destinatarios</button>
       <button data-t="msg">Mensaje</button>
@@ -127,7 +126,7 @@
   document.documentElement.appendChild(root);
 
   const panel = $('#wam-panel');
-  $('#wam-fab').onclick = () => { panel.hidden = !panel.hidden; if (!panel.hidden) refreshData(); };
+  $('#wam-logo').src = chrome.runtime.getURL('icons/icon48.png');
   $('#wam-close').onclick = () => (panel.hidden = true);
   chrome.runtime.onMessage.addListener((m) => {
     if (m && m.type === 'wam-toggle') { panel.hidden = !panel.hidden; if (!panel.hidden) refreshData(); }
