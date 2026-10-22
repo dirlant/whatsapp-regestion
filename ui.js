@@ -57,7 +57,18 @@
   root.id = 'wam-root';
   root.innerHTML = `
   <div id="wam-panel" hidden>
-    <div class="wam-head"><img id="wam-logo" alt=""><div class="wam-title"><b>Envíos masivos</b><span id="wam-conn">…</span></div><button id="wam-close" title="Cerrar">×</button></div>
+    <div class="wam-head"><img id="wam-logo" alt=""><div class="wam-title"><b>Envíos masivos</b><span id="wam-conn">…</span><a id="wam-licstat" title="Cambiar licencia"></a></div><button id="wam-close" title="Cerrar">×</button></div>
+
+    <div id="wam-gate">
+      <div class="wam-card">
+        <b>Activar licencia</b>
+        <p class="wam-hint" id="wam-gate-msg">Ingresa el token de tu licencia.</p>
+        <input id="wam-token" placeholder="Token de licencia" autocomplete="off">
+        <p class="wam-hint">Número de WhatsApp detectado: <b id="wam-num">…</b></p>
+        <button id="wam-activate" class="wam-btn">Activar</button>
+        <button id="wam-gate-close" class="wam-btn alt" hidden>Cerrar</button>
+      </div>
+    </div>
 
     <div class="wam-tabbar wam-seg">
       <button data-tab="env" class="on">Envío</button>
@@ -435,6 +446,74 @@
     renderMetrics();
   };
 
+  // ---------- licencia ----------
+  const LIC_REASONS = {
+    token_no_encontrado: 'El token no existe. Revísalo.',
+    numero_no_coincide: 'Este token pertenece a otro número de WhatsApp.',
+    licencia_revocada: 'La licencia fue revocada.',
+    licencia_vencida: 'La licencia está vencida.',
+  };
+  const GRACE_MS = 24 * 3600 * 1000; // sin conexión: se tolera hasta 24 h desde la última verificación correcta
+  const todayStr = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+  let lic = { token: '', valid: false, until: '', number: '', checkedAt: 0, reason: '', checking: false };
+  let gateOpen = false;
+  const saveLic = () => chrome.storage.local.set({ wamLic: { token: lic.token, valid: lic.valid, until: lic.until, number: lic.number, checkedAt: lic.checkedAt } });
+
+  const renderLic = () => {
+    const st = $('#wam-licstat');
+    st.textContent = !lic.token ? 'Sin licencia' : lic.checking ? 'Verificando…' : lic.valid ? 'Licencia hasta ' + lic.until : 'Licencia no válida';
+    st.className = lic.valid ? 'ok' : 'bad';
+    $('#wam-num').textContent = lic.number ? '+' + lic.number : 'no disponible aún';
+    if (!$('#wam-token').value) $('#wam-token').value = lic.token;
+    $('#wam-gate-msg').textContent = lic.reason || 'Ingresa el token de tu licencia.';
+    $('#wam-gate').hidden = lic.valid && !gateOpen;
+    $('#wam-gate-close').hidden = !lic.valid;
+    $('#wam-start').disabled = !lic.valid;
+  };
+  $('#wam-licstat').onclick = () => { gateOpen = true; renderLic(); };
+  $('#wam-gate-close').onclick = () => { gateOpen = false; renderLic(); };
+
+  const fetchLicense = (token, numero) =>
+    new Promise((resolve) => chrome.runtime.sendMessage({ type: 'wam-license', token, numero }, (r) => resolve(r || { error: chrome.runtime.lastError?.message || 'sin respuesta' })));
+
+  // Verifica la licencia contra la API. Devuelve true si se puede usar la extensión.
+  const checkLicense = async () => {
+    if (!lic.token) { lic.valid = false; lic.reason = ''; renderLic(); return false; }
+    lic.checking = true; renderLic();
+    try {
+      const me = await call('me').catch(() => ({ number: '' }));
+      if (!me.number) { lic.reason = 'Esperando a que WhatsApp Web cargue…'; lic.valid = false; return false; }
+      lic.number = me.number;
+      const r = await fetchLicense(lic.token, lic.number);
+      if (r.status === 200 && r.data) {
+        if (r.data.valida) {
+          lic.valid = true; lic.until = r.data.fecha_vencimiento || ''; lic.reason = ''; lic.checkedAt = Date.now();
+        } else {
+          lic.valid = false; lic.reason = LIC_REASONS[r.data.motivo] || 'Licencia no válida.';
+        }
+      } else if (r.status === 400) {
+        lic.valid = false; lic.reason = 'Falta el token o el número.';
+      } else {
+        // 500 o sin conexión: se tolera si hubo una verificación correcta reciente y no ha vencido
+        const recent = lic.checkedAt && Date.now() - lic.checkedAt < GRACE_MS && (!lic.until || lic.until >= todayStr());
+        lic.valid = !!recent;
+        lic.reason = recent ? '' : 'No se pudo verificar la licencia. Revisa tu conexión.';
+        if (recent) log('Sin conexión con el servidor de licencias: se usa la última verificación', 'err');
+      }
+      saveLic();
+      return lic.valid;
+    } finally {
+      lic.checking = false;
+      renderLic();
+    }
+  };
+  $('#wam-activate').onclick = async () => {
+    lic.token = $('#wam-token').value.trim();
+    lic.checkedAt = 0; // un token nuevo no hereda la tolerancia sin conexión
+    gateOpen = false;
+    await checkLicense();
+  };
+
   // ---------- envío ----------
   const fmt = (s) => { s = Math.round(s); return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`; };
 
@@ -478,6 +557,7 @@
 
   const start = async () => {
     if (run.state === 'running') return;
+    if (!(await checkLicense())) { gateOpen = true; renderLic(); return log(lic.reason || 'Licencia no válida', 'err'); }
     if (!recipients.length) return log('No hay destinatarios', 'err');
     if (!activeMsgs().length) return log('Escribe al menos un mensaje', 'err');
     try { if (!(await call('status')).ready) throw 0; } catch { return log('WhatsApp aún no está listo', 'err'); }
@@ -487,11 +567,15 @@
     statsPrefix = '';
     const queue = [...recipients];
     let nextPauseAt = rndInt(cfg.batchMin, cfg.batchMax);
-    let sinceBreak = 0, consecErr = 0;
+    let sinceBreak = 0, consecErr = 0, lastLic = Date.now();
     log('Envío iniciado');
 
     for (let i = 0; i < queue.length; i++) {
       if (run.stop) break;
+      if (Date.now() - lastLic > 30 * 60 * 1000) {
+        lastLic = Date.now();
+        if (!(await checkLicense())) { log('Envío detenido: ' + (lic.reason || 'licencia no válida'), 'err'); break; }
+      }
       if (run.sent >= cfg.dailyLimit) { log('Límite por sesión alcanzado', 'err'); break; }
       const r = queue[i];
 
@@ -543,6 +627,10 @@
   $('#wam-stop').onclick = () => { run.stop = true; run.paused = false; $('#wam-pause').textContent = 'Pausar'; };
 
   // ---------- init ----------
+  chrome.storage.local.get('wamLic').then(({ wamLic }) => {
+    if (wamLic) lic = { ...lic, ...wamLic, valid: false, checking: false, reason: wamLic.token ? 'Verificando licencia…' : '' };
+    renderLic();
+  });
   chrome.storage.local.get('wamLog').then(({ wamLog }) => { if (Array.isArray(wamLog)) sendLog = wamLog; });
   chrome.storage.local.get('wamCfg').then(({ wamCfg }) => {
     cfg = { ...DEFAULTS, ...(wamCfg || {}) };
@@ -556,7 +644,7 @@
     try {
       const st = await call('status');
       setConn(st.ready);
-      if (st.ready) { clearInterval(poll); refreshData(); }
+      if (st.ready) { clearInterval(poll); refreshData(); checkLicense(); }
     } catch {}
   }, 2000);
 })();

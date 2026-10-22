@@ -89,3 +89,9 @@ details label{display:flex;justify-content:space-between;align-items:center;marg
 .wam-bar-row .wam-bar{margin:0}
 .wam-bar-row em{font-style:normal;text-align:right;color:var(--sub)}
 .wam-bar-row .wam-bar>div{height:100%;background:var(--green)}
+
+#wam-gate{position:absolute;top:59px;left:0;right:0;bottom:0;z-index:5;background:var(--bg);padding:14px;overflow:auto}
+#wam-gate .wam-card{display:flex;flex-direction:column;gap:8px}
+#wam-licstat{font-size:12px;cursor:pointer}
+#wam-licstat.ok{color:var(--green)}#wam-licstat.bad{color:var(--err)}
+.wam-btn:disabled{opacity:.45;cursor:not-allowed}

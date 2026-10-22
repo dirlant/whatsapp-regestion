@@ -18,3 +18,17 @@ chrome.action.onClicked.addListener(async (tab) => {
     chrome.tabs.create({ url: WA });
   }
 });
+
+// Validación de licencia: POST /api/licencia-whatsapp { token, numero }
+const LICENSE_URL = 'https://api-agendaconmigo.vercel.app/api/licencia-whatsapp';
+chrome.runtime.onMessage.addListener((msg, _sender, send) => {
+  if (!msg || msg.type !== 'wam-license') return;
+  fetch(LICENSE_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: msg.token, numero: msg.numero }),
+  })
+    .then(async (r) => send({ status: r.status, data: await r.json().catch(() => ({})) }))
+    .catch((e) => send({ error: e.message }));
+  return true; // respuesta asíncrona
+});

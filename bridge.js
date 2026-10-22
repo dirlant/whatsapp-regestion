@@ -13,6 +13,15 @@
       return { ready: ready() };
     },
 
+    // número de la cuenta que tiene abierta WhatsApp Web (solo dígitos)
+    async me() {
+      let wid = null;
+      try { wid = WPP.conn.getMyUserId(); } catch {}
+      if (!wid) { try { wid = WPP.whatsapp.Conn.wid; } catch {} }
+      const raw = (wid && (wid.user || wid._serialized)) || '';
+      return { number: String(raw).split('@')[0].replace(/\D/g, '') };
+    },
+
     async getData() {
       let labels = [];
       try {
