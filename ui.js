@@ -60,17 +60,9 @@
     <div class="wam-head"><img id="wam-logo" alt=""><div class="wam-title"><b>Envíos masivos</b><span id="wam-conn">…</span></div><button id="wam-close" title="Cerrar">×</button></div>
 
     <div class="wam-body">
-      <h4>Destinatarios</h4>
+      <h4>Etiquetas</h4>
       <div class="wam-card">
-        <div class="wam-seg">
-          <button data-d="num" class="on">Números</button>
-          <button data-d="lbl">Etiquetas</button>
-        </div>
-        <div data-ds="num">
-          <textarea id="wam-nums" rows="4" placeholder="Un contacto por línea:&#10;573001234567, Ana"></textarea>
-          <button id="wam-addnums" class="wam-btn">Agregar a la lista</button>
-        </div>
-        <div data-ds="lbl" hidden>
+        <div>
           <div id="wam-llist" class="wam-list"></div>
           <div id="wam-lblsum" class="wam-hint"></div>
         </div>
@@ -128,13 +120,6 @@
     if (m && m.type === 'wam-toggle') { panel.hidden = !panel.hidden; if (!panel.hidden) refreshData(); }
   });
 
-  // selector Números / Grupos / Etiquetas
-  panel.querySelectorAll('.wam-seg button[data-d]').forEach((b) => {
-    b.onclick = () => {
-      panel.querySelectorAll('.wam-seg button[data-d]').forEach((x) => x.classList.toggle('on', x === b));
-      panel.querySelectorAll('[data-ds]').forEach((s) => (s.hidden = s.dataset.ds !== b.dataset.d));
-    };
-  });
 
   const log = (t, cls = '') => {
     const d = document.createElement('div');
@@ -232,8 +217,7 @@
   const renderPreview = () => { $('#wam-prev').textContent = build(recipients[0] || { name: 'Ana' }, activeMsgs()[0] || ''); };
 
   // ---------- destinatarios ----------
-  // recipients = contactos manuales + chats de las etiquetas marcadas (sin duplicados ni excluidos)
-  let manual = [];
+  // recipients = chats de las etiquetas marcadas (sin duplicados ni excluidos)
   const labelChats = new Map(); // labelId -> [{id,name}]
   const selected = new Set(); // etiquetas marcadas
   const excluded = new Set(); // quitados a mano con ×
@@ -245,16 +229,8 @@
       seen.add(r.id);
       recipients.push(r);
     };
-    manual.forEach(push);
     selected.forEach((id) => (labelChats.get(id) || []).forEach(push));
     renderRecipients();
-  };
-  const addRecipients = (list) => {
-    const before = recipients.length;
-    list.forEach((r) => excluded.delete(r.id));
-    manual.push(...list);
-    rebuild();
-    return recipients.length - before;
   };
   const renderRecipients = () => {
     $('#wam-count').textContent = `${recipients.length} contactos`;
@@ -276,24 +252,10 @@
     if (recipients.length > 300) $('#wam-rlist').append(`… y ${recipients.length - 300} más`);
   };
   $('#wam-clear').onclick = () => {
-    manual = [];
     selected.clear();
     excluded.clear();
     $('#wam-llist').querySelectorAll('input').forEach((i) => (i.checked = false));
     rebuild();
-  };
-
-  $('#wam-addnums').onclick = () => {
-    const lines = $('#wam-nums').value.split('\n').map((l) => l.trim()).filter(Boolean);
-    const out = [];
-    for (const l of lines) {
-      const [n, ...rest] = l.split(/[,;\t]/);
-      const digits = n.replace(/\D/g, '');
-      if (digits.length < 8) { log(`Número inválido: ${l}`, 'err'); continue; }
-      out.push({ id: `${digits}@c.us`, name: rest.join(' ').trim() });
-    }
-    log(`Agregados ${addRecipients(out)} números`);
-    $('#wam-nums').value = '';
   };
 
   const setConn = (ready) => {
