@@ -41,7 +41,8 @@
     typing: true,
     jitter: true,
     maxErrors: 5,
-    message: 'Hola {nombre}, {¿cómo estás?|¿qué tal?}',
+    auto: true,
+    messages: ['Hola {nombre}, {¿cómo estás?|¿qué tal?}'],
   };
   let cfg = { ...DEFAULTS };
   const save = () => chrome.storage.local.set({ wamCfg: cfg });
@@ -80,8 +81,9 @@
 
       <h4>Mensaje</h4>
       <div class="wam-card">
-        <textarea id="wam-msg" rows="4"></textarea>
-        <p class="wam-hint"><code>{nombre}</code> nombre del contacto · <code>{Hola|Buenas}</code> variante al azar</p>
+        <div id="wam-msgs"></div>
+        <button id="wam-addmsg" class="wam-btn alt">+ Agregar otro mensaje</button>
+        <p class="wam-hint">Cada envío elige un mensaje al azar (hasta 10). <code>{nombre}</code> = nombre del contacto · <code>{Hola|Buenas}</code> = variante al azar</p>
         <div class="wam-prev" id="wam-prev"></div>
       </div>
 
@@ -90,6 +92,7 @@
         <div class="wam-seg" id="wam-presets">
           <button data-p="seguro">Seguro</button><button data-p="normal">Normal</button><button data-p="rapido">Rápido</button>
         </div>
+        <label class="wam-sw"><span>Tiempos aleatorios seguros</span><input type="checkbox" id="auto"><i></i></label>
         <label class="wam-sw"><span>Simular "escribiendo…"</span><input type="checkbox" id="typing"><i></i></label>
         <label class="wam-sw"><span>Variación humana</span><input type="checkbox" id="jitter"><i></i></label>
         <details>
@@ -144,11 +147,11 @@
 
   // ---------- campos de configuración ----------
   const numFields = ['minDelay', 'maxDelay', 'batchMin', 'batchMax', 'pauseMin', 'pauseMax', 'dailyLimit', 'maxErrors'];
-  const boolFields = ['typing', 'jitter'];
+  const boolFields = ['auto', 'typing', 'jitter'];
   const syncFields = () => {
     numFields.forEach((k) => ($('#' + k).value = cfg[k]));
     boolFields.forEach((k) => ($('#' + k).checked = cfg[k]));
-    $('#wam-msg').value = cfg.message;
+    renderMsgs();
     markPreset();
   };
   const markPreset = () => {
@@ -159,10 +162,54 @@
   };
   numFields.forEach((k) => ($('#' + k).onchange = (e) => { cfg[k] = Math.max(1, +e.target.value || 1); save(); markPreset(); }));
   boolFields.forEach((k) => ($('#' + k).onchange = (e) => { cfg[k] = e.target.checked; save(); }));
-  $('#wam-msg').oninput = (e) => { cfg.message = e.target.value; save(); renderPreview(); };
   panel.querySelectorAll('[data-p]').forEach((b) => (b.onclick = () => {
     Object.assign(cfg, PRESETS[b.dataset.p]); save(); syncFields();
   }));
+
+  // ---------- mensajes (hasta 10, se guardan en el almacenamiento de la extensión) ----------
+  const MAX_MSGS = 10;
+  const renderMsgs = () => {
+    const box = $('#wam-msgs');
+    box.innerHTML = '';
+    cfg.messages.forEach((m, i) => {
+      const row = document.createElement('div');
+      row.className = 'wam-msg';
+      const ta = document.createElement('textarea');
+      ta.rows = 3;
+      ta.value = m;
+      ta.placeholder = 'Mensaje ' + (i + 1);
+      ta.oninput = () => { cfg.messages[i] = ta.value; save(); renderPreview(); };
+      row.appendChild(ta);
+      if (cfg.messages.length > 1) {
+        const x = document.createElement('a');
+        x.textContent = '×';
+        x.title = 'Quitar mensaje';
+        x.onclick = () => { cfg.messages.splice(i, 1); save(); renderMsgs(); renderPreview(); };
+        row.appendChild(x);
+      }
+      box.appendChild(row);
+    });
+    $('#wam-addmsg').textContent = `+ Agregar otro mensaje (${cfg.messages.length}/${MAX_MSGS})`;
+    $('#wam-addmsg').hidden = cfg.messages.length >= MAX_MSGS;
+  };
+  $('#wam-addmsg').onclick = () => {
+    if (cfg.messages.length >= MAX_MSGS) return;
+    cfg.messages.push('');
+    save();
+    renderMsgs();
+    box_focus();
+  };
+  const box_focus = () => { const t = $('#wam-msgs').querySelectorAll('textarea'); t[t.length - 1]?.focus(); };
+  const activeMsgs = () => cfg.messages.map((m) => m.trim()).filter(Boolean);
+  let lastMsg = -1;
+  const pickMsg = () => {
+    const a = activeMsgs();
+    if (a.length <= 1) return a[0] || '';
+    let i;
+    do { i = Math.floor(Math.random() * a.length); } while (i === lastMsg); // nunca el mismo dos veces seguidas
+    lastMsg = i;
+    return a[i];
+  };
 
   // ---------- mensaje ----------
   const spin = (t) => {
@@ -176,13 +223,13 @@
     } while (t !== prev);
     return t;
   };
-  const build = (r) =>
-    spin(cfg.message)
+  const build = (r, tpl = pickMsg()) =>
+    spin(tpl)
       .replace(/\{nombre\}/gi, (r.name || '').trim())
       .replace(/ +([,!.?])/g, '$1')
       .replace(/[ \t]{2,}/g, ' ')
       .trim();
-  const renderPreview = () => { $('#wam-prev').textContent = build(recipients[0] || { name: 'Ana' }); };
+  const renderPreview = () => { $('#wam-prev').textContent = build(recipients[0] || { name: 'Ana' }, activeMsgs()[0] || ''); };
 
   // ---------- destinatarios ----------
   // recipients = contactos manuales + chats de las etiquetas marcadas (sin duplicados ni excluidos)
@@ -326,7 +373,20 @@
     }
     return true;
   };
+  const gauss = () => Math.sqrt(-2 * Math.log(1 - Math.random())) * Math.cos(2 * Math.PI * Math.random());
+  const SAFE_MIN = 8; // segundos: nunca menos de esto en modo seguro
   const nextDelay = () => {
+    if (cfg.auto) {
+      // distribución log-normal alrededor del punto medio del rango (como un humano: muchos tiempos
+      // cercanos al centro y algunos largos), con piso seguro y cansancio gradual
+      const lo = Math.max(SAFE_MIN, cfg.minDelay);
+      const hi = Math.max(lo * 1.5, cfg.maxDelay);
+      const median = Math.sqrt(lo * hi);
+      const fatigue = 1 + Math.min(0.3, run.sent * 0.004);
+      let d = median * Math.exp(0.45 * gauss()) * fatigue;
+      if (cfg.jitter && Math.random() < 0.1) d *= rnd(1.5, 2.2);
+      return Math.min(hi * 2.5, Math.max(lo, d));
+    }
     let d = rnd(cfg.minDelay, Math.max(cfg.minDelay, cfg.maxDelay));
     if (cfg.jitter && Math.random() < 0.12) d *= rnd(1.5, 2.5);
     return d;
@@ -336,7 +396,7 @@
   const start = async () => {
     if (run.state === 'running') return;
     if (!recipients.length) return log('No hay destinatarios', 'err');
-    if (!cfg.message.trim()) return log('El mensaje está vacío', 'err');
+    if (!activeMsgs().length) return log('Escribe al menos un mensaje', 'err');
     try { if (!(await call('status')).ready) throw 0; } catch { return log('WhatsApp aún no está listo', 'err'); }
     if (!confirm(`Se enviarán hasta ${Math.min(recipients.length, cfg.dailyLimit)} mensajes. ¿Continuar?`)) return;
 
@@ -399,6 +459,9 @@
   // ---------- init ----------
   chrome.storage.local.get('wamCfg').then(({ wamCfg }) => {
     cfg = { ...DEFAULTS, ...(wamCfg || {}) };
+    if (wamCfg && wamCfg.message && !wamCfg.messages) cfg.messages = [wamCfg.message]; // versión anterior
+    if (!Array.isArray(cfg.messages) || !cfg.messages.length) cfg.messages = [''];
+    cfg.messages = cfg.messages.slice(0, MAX_MSGS);
     syncFields();
     renderPreview();
   });
