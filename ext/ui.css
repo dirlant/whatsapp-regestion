@@ -1,0 +1,30 @@
+#wam-root{all:initial;font-family:system-ui,Segoe UI,Arial,sans-serif;font-size:13px;color:#111}
+#wam-root *{box-sizing:border-box}
+#wam-fab{position:fixed;right:16px;bottom:90px;z-index:99998;width:46px;height:46px;border-radius:50%;border:0;background:#25d366;color:#fff;font-size:22px;cursor:pointer;box-shadow:0 2px 8px #0005}
+#wam-panel{position:fixed;right:16px;bottom:144px;z-index:99999;width:380px;max-height:78vh;overflow:auto;background:#fff;border-radius:10px;box-shadow:0 4px 24px #0006;padding:10px}
+#wam-panel[hidden],#wam-root [hidden]{display:none!important}
+.wam-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.wam-head b{flex:1;font-size:15px}
+.wam-head #wam-conn{color:#888}.wam-head #wam-conn.ok{color:#0a8f3c}
+.wam-head button{border:0;background:none;font-size:20px;cursor:pointer}
+.wam-tabs,.wam-sub,.wam-row{display:flex;gap:4px;margin-bottom:8px}
+.wam-tabs button,.wam-sub button,.wam-row button,#wam-panel section>div>button,#wam-clear{flex:1;padding:6px;border:1px solid #ccc;background:#f4f4f4;border-radius:6px;cursor:pointer}
+.wam-tabs button.on,.wam-sub button.on{background:#25d366;color:#fff;border-color:#25d366}
+#wam-panel section>div>button{width:100%;margin-top:6px}
+.wam-row .pri{background:#25d366;color:#fff;border-color:#25d366}
+#wam-panel textarea,#wam-panel input:not([type=checkbox]):not([type=number]){width:100%;padding:6px;border:1px solid #ccc;border-radius:6px;font:inherit;display:block}
+#wam-panel input[type=number]{width:64px;padding:3px}
+#wam-panel label{display:flex;justify-content:space-between;align-items:center;margin:6px 0;gap:6px}
+#wam-panel label.chk{justify-content:flex-start}
+.wam-list{max-height:170px;overflow:auto;border:1px solid #ddd;border-radius:6px;padding:4px;margin-top:6px}
+.wam-list.small{max-height:120px;font-size:12px}
+.wam-list label{justify-content:flex-start;margin:2px 0}
+.wam-list a{cursor:pointer;color:#c00;margin-right:6px}
+.wam-sum{display:flex;align-items:center;justify-content:space-between;margin-top:8px}
+.wam-sum #wam-clear{flex:0 0 auto}
+.wam-hint{color:#666;font-size:12px}
+.wam-prev{background:#f0f8f0;border-radius:6px;padding:6px;white-space:pre-wrap}
+.wam-bar{height:8px;background:#eee;border-radius:4px;margin:6px 0 10px;overflow:hidden}
+#wam-barfill{height:100%;width:0;background:#25d366;transition:width .3s}
+#wam-log{max-height:200px;overflow:auto;font-size:12px;font-family:monospace}
+#wam-log .ok{color:#0a8f3c}#wam-log .err{color:#c00}
