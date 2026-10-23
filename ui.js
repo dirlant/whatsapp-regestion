@@ -46,6 +46,8 @@
     hoursOn: true,
     hourFrom: 8,
     hourTo: 20,
+    source: 'label',
+    cc: '',
     messages: ['Hola {nombre}, {¿cómo estás?|¿qué tal?}'],
   };
   let cfg = { ...DEFAULTS };
@@ -82,11 +84,26 @@
     </div>
 
     <div class="wam-body" data-body="env">
-      <h4>Etiquetas</h4>
+      <h4>Destinatarios</h4>
       <div class="wam-card">
-        <div>
+        <div class="wam-seg" id="wam-source">
+          <button data-src="label" class="on">Por etiqueta</button>
+          <button data-src="excel">Por Excel</button>
+        </div>
+        <div id="wam-pane-label">
           <div id="wam-llist" class="wam-list"></div>
           <div id="wam-lblsum" class="wam-hint"></div>
+        </div>
+        <div id="wam-pane-excel" hidden>
+          <p class="wam-hint">Sube un Excel (.xlsx, .xls o .csv) con una columna de nombre y otra de teléfono. Las demás columnas sirven para personalizar el mensaje.</p>
+          <button id="wam-tpl" class="wam-btn alt">Descargar formato de ejemplo</button>
+          <label class="wam-file"><input type="file" id="wam-file" accept=".xlsx,.xls,.csv"><span id="wam-filename">Elegir archivo…</span></label>
+          <div id="wam-xmap" hidden>
+            <label>Columna de nombre <select id="wam-colname"></select></label>
+            <label>Columna de teléfono <select id="wam-colphone"></select></label>
+            <label>Código de país (opcional) <input type="number" id="wam-cc" placeholder="56"></label>
+            <div id="wam-xsum" class="wam-notice"></div>
+          </div>
         </div>
         <div class="wam-sum"><span id="wam-count">0 contactos</span>
           <span><a id="wam-refresh" title="Recargar etiquetas">Actualizar</a> · <a id="wam-clear">Vaciar</a></span></div>
@@ -127,7 +144,9 @@
       <div class="wam-card">
         <div id="wam-msgs"></div>
         <button id="wam-addmsg" class="wam-btn alt">+ Agregar otro mensaje</button>
-        <p class="wam-hint">Cada envío elige un mensaje al azar (hasta 10). <code>{nombre}</code> = nombre del contacto · <code>{Hola|Buenas}</code> = variante al azar</p>
+        <div class="wam-hint">Variables disponibles (toca una para insertarla):</div>
+        <div id="wam-vars" class="wam-vars"></div>
+        <p class="wam-hint">Cada envío elige un mensaje al azar (hasta 10). <code>{Hola|Buenas}</code> = variante al azar.</p>
         <div class="wam-prev" id="wam-prev"></div>
       </div>
     </div>
@@ -225,6 +244,7 @@
       ta.rows = 3;
       ta.value = m;
       ta.placeholder = 'Mensaje ' + (i + 1);
+      ta.onfocus = () => { lastTa = ta; };
       ta.oninput = () => { cfg.messages[i] = ta.value; save(); renderPreview(); };
       row.appendChild(ta);
       if (cfg.messages.length > 1) {
@@ -270,12 +290,20 @@
     } while (t !== prev);
     return t;
   };
-  const build = (r, tpl = pickMsg()) =>
-    spin(tpl)
-      .replace(/\{nombre\}/gi, (r.name || '').trim())
+  // nombre de variable: sin tildes, minúsculas y con _ (ej. "Fecha de pago" -> fecha_de_pago)
+  const norm = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  // primero se reemplazan las variables y luego las variantes {a|b}
+  const build = (r, tpl = pickMsg()) => {
+    const vars = r.vars || { nombre: r.name || '' };
+    const t = tpl.replace(/\{([^{}|]+)\}/g, (m, k) => {
+      const key = norm(k);
+      return key in vars ? String(vars[key]).replace(/[{}|]/g, '') : m;
+    });
+    return spin(t)
       .replace(/ +([,!.?])/g, '$1')
       .replace(/[ \t]{2,}/g, ' ')
       .trim();
+  };
   const renderPreview = () => { $('#wam-prev').textContent = build(recipients[0] || { name: 'Ana' }, activeMsgs()[0] || ''); };
 
   // ---------- destinatarios ----------
@@ -291,15 +319,55 @@
       seen.add(r.id);
       recipients.push(r);
     };
-    selected.forEach((id) => (labelChats.get(id) || []).forEach(push));
+    // un solo origen a la vez: etiquetas o Excel, nunca los dos
+    if (cfg.source === 'excel') buildExcel().forEach(push);
+    else selected.forEach((id) => (labelChats.get(id) || []).forEach(push));
     renderRecipients();
   };
+
+  // ----- origen Excel -----
+  let excel = { headers: [], rows: [], rawRows: [], colName: -1, colPhone: -1, stats: null };
+  const buildExcel = () => {
+    const out = [], seen = new Set();
+    let invalid = 0, dup = 0;
+    if (excel.colPhone < 0) { excel.stats = null; return out; }
+    for (let n = 0; n < excel.rows.length; n++) {
+      const row = excel.rows[n];
+      const rawPhone = excel.rawRows[n] ? excel.rawRows[n][excel.colPhone] : row[excel.colPhone];
+      let digits = (typeof rawPhone === 'number' ? String(Math.round(rawPhone)) : String(rawPhone ?? '')).replace(/\D/g, '').replace(/^0+/, '');
+      const cc = String(cfg.cc || '');
+      if (cc && digits && digits.length <= 10 && !digits.startsWith(cc)) digits = cc + digits; // número local sin código de país
+      if (digits.length < 8 || digits.length > 15) { invalid++; continue; }
+      if (seen.has(digits)) { dup++; continue; }
+      seen.add(digits);
+      const vars = {};
+      excel.headers.forEach((h, i) => { const k = norm(h); if (k) vars[k] = String(row[i] ?? '').trim(); });
+      vars.nombre = excel.colName >= 0 ? String(row[excel.colName] ?? '').trim() : '';
+      vars.telefono = digits;
+      const pk = norm(excel.headers[excel.colPhone] || '');
+      if (pk) vars[pk] = digits; // {celular}, {whatsapp}… también dan el número limpio
+      out.push({ id: digits + '@c.us', name: vars.nombre, vars });
+    }
+    excel.stats = { invalid, dup, total: excel.rows.length, valid: out.length };
+    return out;
+  };
+  // variables que se pueden usar en el mensaje según el origen elegido
+  const varKeys = () => {
+    if (cfg.source !== 'excel') return ['nombre'];
+    return [...new Set(['nombre', 'telefono', ...excel.headers.map(norm).filter(Boolean)])];
+  };
+
   const renderRecipients = () => {
     $('#wam-count').textContent = `${recipients.length} contactos`;
     const sum = [...selected].reduce((n, id) => n + (labelChats.get(id) || []).length, 0);
     $('#wam-lblsum').textContent = selected.size
       ? `${selected.size} etiqueta(s): ${sum} contactos` + (sum !== recipients.length ? ` · ${recipients.length} en total sin repetir` : '')
       : '';
+    const st = excel.stats;
+    $('#wam-xsum').textContent = st
+      ? `${st.valid} válidos de ${st.total} filas` + (st.invalid ? ` · ${st.invalid} sin teléfono válido` : '') + (st.dup ? ` · ${st.dup} repetidos` : '')
+      : '';
+    renderVars();
     renderPreview();
     $('#wam-rlist').innerHTML = '';
     recipients.slice(0, 300).forEach((r) => {
@@ -313,11 +381,139 @@
     });
     if (recipients.length > 300) $('#wam-rlist').append(`… y ${recipients.length - 300} más`);
   };
-  $('#wam-clear').onclick = () => {
+  const clearExcel = () => {
+    excel = { headers: [], rows: [], rawRows: [], colName: -1, colPhone: -1, stats: null };
+    $('#wam-file').value = '';
+    $('#wam-filename').textContent = 'Elegir archivo…';
+    $('#wam-xmap').hidden = true;
+  };
+  const clearLabels = () => {
     selected.clear();
-    excluded.clear();
     $('#wam-llist').querySelectorAll('input').forEach((i) => (i.checked = false));
+  };
+  $('#wam-clear').onclick = () => {
+    excluded.clear();
+    clearLabels();
+    clearExcel();
     rebuild();
+  };
+
+  // selector de origen: Por etiqueta / Por Excel (excluyentes)
+  const applySource = () => {
+    const ex = cfg.source === 'excel';
+    panel.querySelectorAll('#wam-source button').forEach((b) => b.classList.toggle('on', (b.dataset.src === 'excel') === ex));
+    $('#wam-pane-label').hidden = ex;
+    $('#wam-pane-excel').hidden = !ex;
+    $('#wam-refresh').hidden = ex;
+    rebuild();
+  };
+  panel.querySelectorAll('#wam-source button').forEach((b) => {
+    b.onclick = () => {
+      if (b.dataset.src === cfg.source) return;
+      if ((selected.size || excel.rows.length) && !confirm('Cambiar de origen quitará la selección actual. ¿Continuar?')) return;
+      excluded.clear();
+      clearLabels();
+      clearExcel();
+      cfg.source = b.dataset.src;
+      save();
+      applySource();
+    };
+  });
+
+  // lectura del archivo
+  const guessCol = (headers, re) => headers.findIndex((h) => re.test(norm(h)));
+  const loadFile = (file) => {
+    const reader = new FileReader();
+    reader.onerror = () => log('No se pudo leer el archivo', 'err');
+    reader.onload = () => {
+      try {
+        const wb = XLSX.read(new Uint8Array(reader.result), { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        // texto tal como se ve en Excel (fechas y montos con formato) + valores numéricos reales
+        // (para que un teléfono guardado como número no se convierta en 5.9E+11)
+        const fmtAll = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+        const rawAll = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, rawNumbers: true, defval: '' });
+        const keep = fmtAll.map((r, i) => (r.some((c) => String(c).trim() !== '') ? i : -1)).filter((i) => i >= 0);
+        if (keep.length < 2) throw new Error('El archivo no tiene filas de datos');
+        const aoa = keep.map((i) => fmtAll[i]);
+        const raw = keep.map((i) => rawAll[i]);
+        const headers = aoa[0].map((h) => String(h).trim());
+        const rows = aoa.slice(1, 5001);
+        const rawRows = raw.slice(1, 5001);
+        let colName = guessCol(headers, /(^|_)(nombre|name|cliente|contacto)(_|$)/);
+        let colPhone = guessCol(headers, /(tel|cel|whats|phone|movil|numero|fono)/);
+        if (colPhone < 0) { // la columna con más celdas que parecen teléfonos
+          let best = 0;
+          headers.forEach((_, i) => {
+            const n = rows.filter((r) => String(r[i]).replace(/\D/g, '').length >= 8).length;
+            if (n > best) { best = n; colPhone = i; }
+          });
+        }
+        if (colName < 0) colName = headers.findIndex((_, i) => i !== colPhone);
+        excluded.clear();
+        excel = { headers, rows, rawRows, colName, colPhone, stats: null };
+        const opts = (sel, withNone) => {
+          sel.innerHTML = '';
+          if (withNone) sel.add(new Option('(ninguna)', -1));
+          headers.forEach((h, i) => sel.add(new Option(h || 'Columna ' + (i + 1), i)));
+        };
+        opts($('#wam-colname'), true);
+        opts($('#wam-colphone'), false);
+        $('#wam-colname').value = colName;
+        $('#wam-colphone').value = colPhone;
+        $('#wam-cc').value = cfg.cc || '';
+        $('#wam-filename').textContent = file.name;
+        $('#wam-xmap').hidden = false;
+        if (colPhone < 0) log('No se encontró la columna de teléfono: elígela manualmente', 'err');
+        log(`Excel cargado: ${rows.length} filas`);
+        rebuild();
+      } catch (e) {
+        clearExcel();
+        log('Excel no válido: ' + e.message, 'err');
+        rebuild();
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+  $('#wam-file').onchange = (e) => { if (e.target.files[0]) loadFile(e.target.files[0]); };
+  $('#wam-colname').onchange = (e) => { excel.colName = +e.target.value; rebuild(); };
+  $('#wam-colphone').onchange = (e) => { excel.colPhone = +e.target.value; rebuild(); };
+  $('#wam-cc').onchange = (e) => { cfg.cc = e.target.value.replace(/\D/g, ''); e.target.value = cfg.cc; save(); rebuild(); };
+
+  // formato de ejemplo descargable
+  $('#wam-tpl').onclick = () => {
+    const rows = [
+      ['Nombre', 'Telefono', 'Empresa', 'Monto', 'Fecha'],
+      ['Ana Pérez', '56912345678', 'Panadería Sol', '25.000', '30/11/2026'],
+      ['Luis Gómez', '56987654321', 'Ferretería Norte', '48.500', '02/12/2026'],
+      ['María Rojas', '595991234567', 'Café Central', '12.000', '05/12/2026'],
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [{ wch: 18 }, { wch: 16 }, { wch: 20 }, { wch: 12 }, { wch: 14 }];
+    for (let r = 1; r < rows.length; r++) { const c = ws[XLSX.utils.encode_cell({ r, c: 1 })]; c.t = 's'; c.z = '@'; }
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Contactos');
+    XLSX.writeFile(wb, 'formato-contactos.xlsx');
+  };
+
+  // variables del mensaje (chips); se insertan donde está el cursor
+  let lastTa = null;
+  const renderVars = () => {
+    const box = $('#wam-vars');
+    box.innerHTML = '';
+    varKeys().forEach((k) => {
+      const c = document.createElement('a');
+      c.textContent = '{' + k + '}';
+      c.onmousedown = (e) => e.preventDefault();
+      c.onclick = () => {
+        const ta = lastTa && document.contains(lastTa) ? lastTa : $('#wam-msgs textarea');
+        if (!ta) return;
+        ta.setRangeText('{' + k + '}', ta.selectionStart, ta.selectionEnd, 'end');
+        ta.dispatchEvent(new Event('input'));
+        ta.focus();
+      };
+      box.appendChild(c);
+    });
   };
 
   const setConn = (ready) => {
@@ -621,6 +817,13 @@
     if (!(await checkLicense())) { gateOpen = true; renderLic(); return log(lic.reason || 'Licencia no válida', 'err'); }
     if (!recipients.length) return log('No hay destinatarios', 'err');
     if (!activeMsgs().length) return log('Escribe al menos un mensaje', 'err');
+    if (cfg.source === 'excel' && !excel.rows.length) return log('Carga primero un archivo Excel', 'err');
+    const allowedVars = new Set(varKeys());
+    const unknown = new Set();
+    activeMsgs().forEach((m) => [...m.matchAll(/{([^{}|]+)}/g)].forEach((x) => { if (!allowedVars.has(norm(x[1]))) unknown.add(x[0]); }));
+    if (unknown.size) {
+      return log('Variables sin datos: ' + [...unknown].join(' ') + (cfg.source === 'excel' ? ' (no existen como columna en el Excel)' : ' (solo existen al enviar por Excel)'), 'err');
+    }
     try { if (!(await call('status')).ready) throw 0; } catch { return log('WhatsApp aún no está listo', 'err'); }
     const allowed = dailyAllowance();
     const remaining = allowed - sentToday();
@@ -708,7 +911,9 @@
     if (wamCfg && wamCfg.message && !wamCfg.messages) cfg.messages = [wamCfg.message]; // versión anterior
     if (!Array.isArray(cfg.messages) || !cfg.messages.length) cfg.messages = [''];
     cfg.messages = cfg.messages.slice(0, MAX_MSGS);
+    if (cfg.source !== 'excel') cfg.source = 'label';
     syncFields();
+    applySource();
     renderPreview();
   });
   const t0 = Date.now();

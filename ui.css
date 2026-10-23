@@ -101,3 +101,11 @@ details label{display:flex;justify-content:space-between;align-items:center;marg
 
 .wam-stat{display:flex;gap:10px;flex-wrap:wrap;line-height:1.2}
 .wam-head{height:59px}
+
+#wam-panel select{max-width:180px;padding:6px 8px;border:0;border-radius:8px;background:var(--input);color:var(--text);font:inherit}
+#wam-xmap input[type=number]{width:80px}
+.wam-file{display:block;margin:8px 0;cursor:pointer}
+.wam-file input{position:absolute;opacity:0;pointer-events:none}
+.wam-file span{display:block;padding:10px 12px;border:1px dashed var(--sub);border-radius:10px;text-align:center;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wam-vars{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.wam-vars a{padding:3px 9px;border-radius:12px;background:var(--input);color:var(--green);font-size:12.5px;cursor:pointer;user-select:none}
