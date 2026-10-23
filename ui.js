@@ -42,6 +42,10 @@
     jitter: true,
     maxErrors: 5,
     auto: true,
+    warmup: true,
+    hoursOn: true,
+    hourFrom: 8,
+    hourTo: 20,
     messages: ['Hola {nombre}, {¿cómo estás?|¿qué tal?}'],
   };
   let cfg = { ...DEFAULTS };
@@ -97,12 +101,15 @@
         <label class="wam-sw"><span>Tiempos aleatorios seguros</span><input type="checkbox" id="auto"><i></i></label>
         <label class="wam-sw"><span>Simular "escribiendo…"</span><input type="checkbox" id="typing"><i></i></label>
         <label class="wam-sw"><span>Variación humana</span><input type="checkbox" id="jitter"><i></i></label>
+        <label class="wam-sw"><span>Calentamiento gradual (modo seguro)</span><input type="checkbox" id="warmup"><i></i></label>
+        <label class="wam-sw"><span>Solo en horario (modo seguro)</span><input type="checkbox" id="hoursOn"><i></i></label>
         <details>
           <summary>Ajustes avanzados</summary>
           <label>Intervalo (seg) <span><input type="number" id="minDelay" min="1"> – <input type="number" id="maxDelay" min="1"></span></label>
           <label>Pausa cada (mensajes) <span><input type="number" id="batchMin" min="1"> – <input type="number" id="batchMax" min="1"></span></label>
           <label>Duración pausa (min) <span><input type="number" id="pauseMin" min="1"> – <input type="number" id="pauseMax" min="1"></span></label>
-          <label>Límite por sesión <span><input type="number" id="dailyLimit" min="1"></span></label>
+          <label>Horario permitido (hora) <span><input type="number" id="hourFrom" min="0" max="23"> – <input type="number" id="hourTo" min="1" max="24"></span></label>
+          <label>Límite diario <span><input type="number" id="dailyLimit" min="1"></span></label>
           <label>Parar tras errores seguidos <span><input type="number" id="maxErrors" min="1"></span></label>
         </details>
       </div>
@@ -181,8 +188,8 @@
   };
 
   // ---------- campos de configuración ----------
-  const numFields = ['minDelay', 'maxDelay', 'batchMin', 'batchMax', 'pauseMin', 'pauseMax', 'dailyLimit', 'maxErrors'];
-  const boolFields = ['auto', 'typing', 'jitter'];
+  const numFields = ['minDelay', 'maxDelay', 'batchMin', 'batchMax', 'pauseMin', 'pauseMax', 'dailyLimit', 'maxErrors', 'hourFrom', 'hourTo'];
+  const boolFields = ['auto', 'typing', 'jitter', 'warmup', 'hoursOn'];
   const syncFields = () => {
     numFields.forEach((k) => ($('#' + k).value = cfg[k]));
     boolFields.forEach((k) => ($('#' + k).checked = cfg[k]));
@@ -195,7 +202,12 @@
       b.classList.toggle('on', Object.keys(p).every((k) => cfg[k] === p[k]));
     });
   };
-  numFields.forEach((k) => ($('#' + k).onchange = (e) => { cfg[k] = Math.max(1, +e.target.value || 1); save(); markPreset(); }));
+  numFields.forEach((k) => ($('#' + k).onchange = (e) => {
+    const isHour = k === 'hourFrom' || k === 'hourTo';
+    cfg[k] = isHour ? Math.min(k === 'hourFrom' ? 23 : 24, Math.max(k === 'hourFrom' ? 0 : 1, +e.target.value || 0)) : Math.max(1, +e.target.value || 1);
+    e.target.value = cfg[k];
+    save(); markPreset();
+  }));
   boolFields.forEach((k) => ($('#' + k).onchange = (e) => { cfg[k] = e.target.checked; save(); }));
   panel.querySelectorAll('[data-p]').forEach((b) => (b.onclick = () => {
     Object.assign(cfg, PRESETS[b.dataset.p]); save(); syncFields();
@@ -571,7 +583,38 @@
     if (cfg.jitter && Math.random() < 0.12) d *= rnd(1.5, 2.5);
     return d;
   };
-  const typingMs = (txt) => (cfg.typing ? Math.min(7000, Math.max(1200, txt.length * rnd(35, 70))) : 0);
+  // Modo seguro: ritmo de teclado humano (~90–200 ms por carácter, entre 2 y 25 s).
+  const typingMs = (txt) => {
+    if (!cfg.typing) return 0;
+    if (cfg.auto) return Math.min(25000, Math.max(2000, txt.length * rnd(90, 200)));
+    return Math.min(7000, Math.max(1200, txt.length * rnd(35, 70)));
+  };
+
+  // ----- límites del modo seguro: tope diario real, calentamiento gradual, horario y orden aleatorio -----
+  const WARMUP = [30, 60, 100, 150]; // envíos permitidos en cada uno de los primeros días de uso
+  const sentToday = () => { const k = dayKey(Date.now()); return sendLog.filter((e) => e.ok && dayKey(e.t) === k).length; };
+  const activeDaysBefore = () => {
+    const k = dayKey(Date.now());
+    return new Set(sendLog.filter((e) => e.ok && dayKey(e.t) !== k).map((e) => dayKey(e.t))).size;
+  };
+  const dailyAllowance = () => {
+    let lim = cfg.dailyLimit;
+    if (cfg.auto && cfg.warmup) {
+      const d = activeDaysBefore();
+      if (d < WARMUP.length) lim = Math.min(lim, WARMUP[d]);
+    }
+    return lim;
+  };
+  const hoursActive = () => cfg.auto && cfg.hoursOn && cfg.hourFrom < cfg.hourTo;
+  const inWindow = () => { const n = new Date(); const h = n.getHours() + n.getMinutes() / 60; return h >= cfg.hourFrom && h < cfg.hourTo; };
+  const secondsToWindow = () => {
+    const n = new Date();
+    const t = new Date(n);
+    t.setHours(cfg.hourFrom, 0, 0, 0);
+    if (t <= n) t.setDate(t.getDate() + 1);
+    return (t - n) / 1000 + rnd(0, 600); // hasta 10 min extra para no arrancar siempre a la misma hora
+  };
+  const shuffle = (a) => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
   const start = async () => {
     if (run.state === 'running') return;
@@ -579,11 +622,15 @@
     if (!recipients.length) return log('No hay destinatarios', 'err');
     if (!activeMsgs().length) return log('Escribe al menos un mensaje', 'err');
     try { if (!(await call('status')).ready) throw 0; } catch { return log('WhatsApp aún no está listo', 'err'); }
-    if (!confirm(`Se enviarán hasta ${Math.min(recipients.length, cfg.dailyLimit)} mensajes. ¿Continuar?`)) return;
+    const allowed = dailyAllowance();
+    const remaining = allowed - sentToday();
+    if (remaining <= 0) return log(`Límite diario alcanzado: ${sentToday()} de ${allowed} enviados hoy. Continúa mañana.`, 'err');
+    const warm = cfg.auto && cfg.warmup && allowed < cfg.dailyLimit ? ` (calentamiento: hoy máximo ${allowed})` : '';
+    if (!confirm(`Se enviarán hasta ${Math.min(recipients.length, remaining)} mensajes hoy${warm}. ¿Continuar?`)) return;
 
     run = { state: 'running', sent: 0, failed: 0, stop: false, paused: false };
     statsPrefix = '';
-    const queue = [...recipients];
+    const queue = cfg.auto ? shuffle([...recipients]) : [...recipients];
     let nextPauseAt = rndInt(cfg.batchMin, cfg.batchMax);
     let sinceBreak = 0, consecErr = 0, lastLic = Date.now();
     log('Envío iniciado');
@@ -594,7 +641,13 @@
         lastLic = Date.now();
         if (!(await checkLicense())) { log('Envío detenido: ' + (lic.reason || 'licencia no válida'), 'err'); break; }
       }
-      if (run.sent >= cfg.dailyLimit) { log('Límite por sesión alcanzado', 'err'); break; }
+      if (sentToday() >= dailyAllowance()) { log(`Límite diario alcanzado (${sentToday()} hoy). Continúa mañana.`, 'err'); break; }
+      if (hoursActive() && !inWindow()) {
+        const sec = secondsToWindow();
+        log(`Fuera del horario (${cfg.hourFrom}:00–${cfg.hourTo}:00). Se reanuda en ${fmt(sec)}`);
+        if (!(await wait(sec, 'Fuera de horario, reanuda en'))) break;
+        sinceBreak = 0;
+      }
       const r = queue[i];
 
       if (sinceBreak >= nextPauseAt) {
