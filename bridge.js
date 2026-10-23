@@ -19,6 +19,10 @@
         version: (w && w.version) || '',
         injected: !!(w && w.webpack && w.webpack.isInjected),
         waVersion: (window.Debug && window.Debug.VERSION) || '',
+        loaderType: (w && w.webpack && w.webpack.loaderType) || '',
+        has: ['require', '__d', 'importNamespace', 'ErrorGuard', 'webpackChunkwhatsapp_web_client', '__debug']
+          .filter((k) => { try { return typeof window[k] !== 'undefined'; } catch { return false; } }).join(','),
+        keys: Object.keys(window).filter((k) => /webpack|^__d$|require|debug|comet|^Debug$/i.test(k)).slice(0, 12).join(','),
       };
     },
 
