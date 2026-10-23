@@ -17,6 +17,8 @@
         isReady: !!(w && w.isReady),
         isFullReady: !!(w && w.isFullReady),
         version: (w && w.version) || '',
+        injected: !!(w && w.webpack && w.webpack.isInjected),
+        waVersion: (window.Debug && window.Debug.VERSION) || '',
       };
     },
 

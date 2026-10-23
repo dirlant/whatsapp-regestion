@@ -925,7 +925,7 @@
       if (st.ready) { clearInterval(poll); refreshData(); checkLicense(); }
       else if (!diagShown && Date.now() - t0 > 25000) {
         diagShown = true;
-        log(`WhatsApp no termina de cargar la librería interna (WPP=${st.hasWPP}, isReady=${st.isReady}, isFullReady=${st.isFullReady}). Recarga la página con Ctrl+Shift+R.`, 'err');
+        log(`WhatsApp no termina de cargar la librería interna (WPP=${st.hasWPP}, isReady=${st.isReady}, isFullReady=${st.isFullReady}, inyectada=${st.injected}, WhatsApp Web ${st.waVersion || '?'}, librería ${st.version || '?'}). Recarga la página con Ctrl+Shift+R.`, 'err');
       }
     } catch {}
   }, 2000);
