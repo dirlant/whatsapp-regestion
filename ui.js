@@ -36,6 +36,20 @@
     normal: { minDelay: 12, maxDelay: 30, batchMin: 25, batchMax: 40, pauseMin: 5, pauseMax: 10, dailyLimit: 300 },
     rapido: { minDelay: 5, maxDelay: 12, batchMin: 40, batchMax: 60, pauseMin: 3, pauseMax: 6, dailyLimit: 600 },
   };
+  // mensajes de ejemplo (regestión); la persona puede editarlos, borrarlos y crear todos los que quiera
+  const EXAMPLE_MSGS = [
+    'Holaa bella, pudiste revisar la propuesta que te envié?',
+    'Holaa bella, se me habilitó un cupo para esta semana, sigues interesada?',
+    'Holaa bella, aún sigues interesada en el servicio?',
+    'Holaa bella, quedé pendiente de tu respuesta sobre la propuesta, qué te pareció?',
+    'Holaa bella, estoy por abrir cupos nuevos para una nueva promoción, quisieras más información?',
+    'Holaa bella, cómo estás? Quería saber si lograste ver la información que te mandé.',
+    'Holaa bella, justo me quedó un espacio libre, quieres que te lo reserve?',
+    'Holaa bella, qué te pareció la propuesta? Si quieres te la explico por aquí.',
+    'Holaa bella, sigues pensando en el servicio o prefieres que lo dejemos para más adelante?',
+    'Holaa bella, no quiero que te quedes sin tu cupo, lo retomamos esta semana?',
+  ];
+  const OLD_DEFAULT_MSG = 'Hola {nombre}, {¿cómo estás?|¿qué tal?}';
   const DEFAULTS = {
     ...PRESETS.normal,
     typing: true,
@@ -48,10 +62,14 @@
     hourTo: 20,
     source: 'label',
     cc: '',
-    messages: ['Hola {nombre}, {¿cómo estás?|¿qué tal?}'],
+    messages: [...EXAMPLE_MSGS],
   };
   let cfg = { ...DEFAULTS };
-  const save = () => chrome.storage.local.set({ wamCfg: cfg });
+  // los mensajes se guardan en el almacenamiento de la extensión y también en localStorage (copia de respaldo)
+  const save = () => {
+    chrome.storage.local.set({ wamCfg: cfg });
+    try { localStorage.setItem('wam_messages', JSON.stringify(cfg.messages)); } catch {}
+  };
 
   // ---------- estado ----------
   let recipients = []; // {id, name}
@@ -148,13 +166,14 @@
     </div>
 
     <div class="wam-body" data-body="msg" hidden>
-      <h4>Mensajes (hasta 10)</h4>
+      <h4>Mensajes</h4>
       <div class="wam-card">
         <div id="wam-msgs"></div>
         <button id="wam-addmsg" class="wam-btn alt">+ Agregar otro mensaje</button>
         <div class="wam-hint">Variables disponibles (toca una para insertarla):</div>
         <div id="wam-vars" class="wam-vars"></div>
-        <p class="wam-hint">Cada envío elige un mensaje al azar (hasta 10). <code>{Hola|Buenas}</code> = variante al azar.</p>
+        <button id="wam-examples" class="wam-btn alt">Cargar mensajes de ejemplo</button>
+        <p class="wam-hint">Crea todos los mensajes que quieras: cada envío elige uno al azar. <code>{Hola|Buenas}</code> = variante al azar.</p>
         <div class="wam-prev" id="wam-prev"></div>
       </div>
     </div>
@@ -240,8 +259,7 @@
     Object.assign(cfg, PRESETS[b.dataset.p]); save(); syncFields();
   }));
 
-  // ---------- mensajes (hasta 10, se guardan en el almacenamiento de la extensión) ----------
-  const MAX_MSGS = 10;
+  // ---------- mensajes (sin límite; se guardan en el almacenamiento de la extensión y en localStorage) ----------
   const renderMsgs = () => {
     const box = $('#wam-msgs');
     box.innerHTML = '';
@@ -264,11 +282,14 @@
       }
       box.appendChild(row);
     });
-    $('#wam-addmsg').textContent = `+ Agregar otro mensaje (${cfg.messages.length}/${MAX_MSGS})`;
-    $('#wam-addmsg').hidden = cfg.messages.length >= MAX_MSGS;
+    $('#wam-addmsg').textContent = `+ Agregar otro mensaje (${cfg.messages.length})`;
+  };
+  $('#wam-examples').onclick = () => {
+    if (activeMsgs().length && !confirm('Se reemplazarán tus mensajes actuales por los 10 de ejemplo. ¿Continuar?')) return;
+    cfg.messages = [...EXAMPLE_MSGS];
+    save(); renderMsgs(); renderPreview();
   };
   $('#wam-addmsg').onclick = () => {
-    if (cfg.messages.length >= MAX_MSGS) return;
     cfg.messages.push('');
     save();
     renderMsgs();
@@ -961,7 +982,13 @@
     cfg = { ...DEFAULTS, ...(wamCfg || {}) };
     if (wamCfg && wamCfg.message && !wamCfg.messages) cfg.messages = [wamCfg.message]; // versión anterior
     if (!Array.isArray(cfg.messages) || !cfg.messages.length) cfg.messages = [''];
-    cfg.messages = cfg.messages.slice(0, MAX_MSGS);
+    // sin mensajes propios (o solo el de ejemplo anterior): se cargan los 10 de ejemplo
+    if (cfg.messages.every((m) => !m.trim() || m === OLD_DEFAULT_MSG)) {
+      let backup = null;
+      try { backup = JSON.parse(localStorage.getItem('wam_messages') || 'null'); } catch {}
+      cfg.messages = Array.isArray(backup) && backup.some((m) => String(m).trim() && m !== OLD_DEFAULT_MSG) ? backup : [...EXAMPLE_MSGS];
+      save();
+    }
     if (cfg.source !== 'excel') cfg.source = 'label';
     syncFields();
     applySource();
