@@ -109,3 +109,6 @@ details label{display:flex;justify-content:space-between;align-items:center;marg
 .wam-file span{display:block;padding:10px 12px;border:1px dashed var(--sub);border-radius:10px;text-align:center;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wam-vars{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
 .wam-vars a{padding:3px 9px;border-radius:12px;background:var(--input);color:var(--green);font-size:12.5px;cursor:pointer;user-select:none}
+
+.wam-resume{border:1px solid var(--green);margin-bottom:6px}
+.wam-resume .wam-row{margin-top:8px}

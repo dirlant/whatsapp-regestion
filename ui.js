@@ -84,6 +84,14 @@
     </div>
 
     <div class="wam-body" data-body="env">
+      <div id="wam-resume" class="wam-card wam-resume" hidden>
+        <b>Envío pendiente</b>
+        <div id="wam-resume-info" class="wam-hint"></div>
+        <div class="wam-row">
+          <button id="wam-resume-go" class="wam-btn">Reanudar</button>
+          <button id="wam-resume-drop" class="wam-btn alt danger">Descartar</button>
+        </div>
+      </div>
       <h4>Destinatarios</h4>
       <div class="wam-card">
         <div class="wam-seg" id="wam-source">
@@ -745,7 +753,7 @@
 
   let statsPrefix = '';
   const setStats = (extra = '') => {
-    const total = recipients.length;
+    const total = run.total ?? recipients.length;
     $('#wam-stats').textContent = `${statsPrefix}Enviados ${run.sent} · Fallidos ${run.failed} · Total ${total}${extra ? ' — ' + extra : ''}`;
     $('#wam-barfill').style.width = total ? ((run.sent + run.failed) / total) * 100 + '%' : '0%';
   };
@@ -812,13 +820,32 @@
   };
   const shuffle = (a) => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
-  const start = async () => {
+  // ----- envío pendiente: se guarda la cola restante para poder retomarla si se cierra la pestaña o se apaga el equipo -----
+  let job = null; // { queue, total, sent, failed, source, startedAt }
+  const persistJob = () => (job ? chrome.storage.local.set({ wamJob: job }) : chrome.storage.local.remove('wamJob'));
+  const renderResume = () => {
+    const show = !!(job && job.queue.length) && run.state !== 'running';
+    $('#wam-resume').hidden = !show;
+    if (!show) return;
+    $('#wam-resume-info').textContent =
+      `Quedan ${job.queue.length} de ${job.total} contactos · enviados ${job.sent}, fallidos ${job.failed} · iniciado ` +
+      new Date(job.startedAt).toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  };
+  $('#wam-resume-drop').onclick = () => {
+    if (!confirm('¿Descartar el envío pendiente? Los contactos que faltan no recibirán el mensaje.')) return;
+    job = null; persistJob(); renderResume();
+  };
+  $('#wam-resume-go').onclick = () => start(true);
+
+  const start = async (resume = false) => {
     if (run.state === 'running') return;
     if (!(await checkLicense())) { gateOpen = true; renderLic(); return log(lic.reason || 'Licencia no válida', 'err'); }
-    if (!recipients.length) return log('No hay destinatarios', 'err');
+    if (resume !== true) {
+      if (!recipients.length) return log('No hay destinatarios', 'err');
+      if (cfg.source === 'excel' && !excel.rows.length) return log('Carga primero un archivo Excel', 'err');
+    } else if (!job || !job.queue.length) return log('No hay un envío pendiente', 'err');
     if (!activeMsgs().length) return log('Escribe al menos un mensaje', 'err');
-    if (cfg.source === 'excel' && !excel.rows.length) return log('Carga primero un archivo Excel', 'err');
-    const allowedVars = new Set(varKeys());
+    const allowedVars = new Set(resume === true ? (job.queue[0].vars ? Object.keys(job.queue[0].vars) : ['nombre']) : varKeys());
     const unknown = new Set();
     activeMsgs().forEach((m) => [...m.matchAll(/{([^{}|]+)}/g)].forEach((x) => { if (!allowedVars.has(norm(x[1]))) unknown.add(x[0]); }));
     if (unknown.size) {
@@ -829,11 +856,22 @@
     const remaining = allowed - sentToday();
     if (remaining <= 0) return log(`Límite diario alcanzado: ${sentToday()} de ${allowed} enviados hoy. Continúa mañana.`, 'err');
     const warm = cfg.auto && cfg.warmup && allowed < cfg.dailyLimit ? ` (calentamiento: hoy máximo ${allowed})` : '';
-    if (!confirm(`Se enviarán hasta ${Math.min(recipients.length, remaining)} mensajes hoy${warm}. ¿Continuar?`)) return;
+    const pending = resume === true ? job.queue.length : recipients.length;
+    if (!confirm(`${resume === true ? 'Se reanudará el envío' : 'Se enviarán'}: hasta ${Math.min(pending, remaining)} mensajes hoy${warm}. ¿Continuar?`)) return;
+    if (resume !== true && job && job.queue.length && !confirm('Hay un envío pendiente sin terminar. Iniciar uno nuevo lo descartará. ¿Continuar?')) return;
 
-    run = { state: 'running', sent: 0, failed: 0, stop: false, paused: false };
+    let queue;
+    if (resume === true) {
+      queue = [...job.queue];
+      run = { state: 'running', sent: job.sent, failed: job.failed, stop: false, paused: false, total: job.total };
+    } else {
+      queue = cfg.auto ? shuffle([...recipients]) : [...recipients];
+      job = { queue, total: queue.length, sent: 0, failed: 0, source: cfg.source, startedAt: Date.now() };
+      run = { state: 'running', sent: 0, failed: 0, stop: false, paused: false, total: queue.length };
+    }
     statsPrefix = '';
-    const queue = cfg.auto ? shuffle([...recipients]) : [...recipients];
+    let processed = 0;
+    persistJob(); renderResume();
     let nextPauseAt = rndInt(cfg.batchMin, cfg.batchMax);
     let sinceBreak = 0, consecErr = 0, lastLic = Date.now();
     log('Envío iniciado');
@@ -866,6 +904,9 @@
       const text = build(r);
       const msgIdx = lastMsg;
       const who = r.name || r.id.split('@')[0];
+      // se guarda ANTES de enviar: si la pestaña se cierra a mitad, no se repite este contacto (evita duplicados)
+      job.queue = queue.slice(i + 1);
+      persistJob();
       try {
         let to = r.id;
         if (to.endsWith('@c.us')) {
@@ -882,18 +923,25 @@
         run.failed++; consecErr++;
         record({ ok: false, id: r.id, name: r.name, err: e.message });
         log(`✗ ${who}: ${e.message}`, 'err');
-        if (consecErr >= cfg.maxErrors) { log(`Detenido: ${consecErr} errores seguidos`, 'err'); break; }
+        if (consecErr >= cfg.maxErrors) { processed++; job.sent = run.sent; job.failed = run.failed; persistJob(); log(`Detenido: ${consecErr} errores seguidos`, 'err'); break; }
       }
+      processed++;
+      job.sent = run.sent; job.failed = run.failed;
+      persistJob();
       setStats();
       if (i < queue.length - 1 && !(await wait(nextDelay(), 'Próximo en'))) break;
     }
     run.state = 'idle';
-    statsPrefix = run.stop ? 'Detenido. ' : 'Terminado. ';
+    const finished = processed >= queue.length;
+    if (finished) job = null; // terminó todo: no queda nada pendiente
+    else if (job) job.queue = queue.slice(processed);
+    persistJob(); renderResume();
+    statsPrefix = finished ? 'Terminado. ' : 'Detenido. ';
     setStats();
-    log(run.stop ? 'Envío detenido' : 'Envío terminado');
+    log(finished ? 'Envío terminado' : `Envío detenido. Quedan ${queue.length - processed} contactos pendientes: puedes reanudar`);
   };
 
-  $('#wam-start').onclick = start;
+  $('#wam-start').onclick = () => start(false);
   $('#wam-pause').onclick = () => {
     run.paused = !run.paused;
     $('#wam-pause').textContent = run.paused ? 'Reanudar' : 'Pausar';
@@ -904,6 +952,9 @@
   chrome.storage.local.get('wamLic').then(({ wamLic }) => {
     if (wamLic) lic = { ...lic, ...wamLic, valid: false, checking: false, reason: wamLic.token ? 'Verificando licencia…' : '' };
     renderLic();
+  });
+  chrome.storage.local.get('wamJob').then(({ wamJob }) => {
+    if (wamJob && Array.isArray(wamJob.queue) && wamJob.queue.length) { job = wamJob; renderResume(); }
   });
   chrome.storage.local.get('wamLog').then(({ wamLog }) => { if (Array.isArray(wamLog)) sendLog = wamLog; });
   chrome.storage.local.get('wamCfg').then(({ wamCfg }) => {
