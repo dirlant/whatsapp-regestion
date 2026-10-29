@@ -814,7 +814,8 @@
     $('#wam-avinfo').textContent = notifs.length ? notifs.length + ' aviso(s) · ' + un.length + ' sin leer' : 'Sin avisos.';
     const box = $('#wam-avlist');
     box.innerHTML = '';
-    notifs.forEach((n) => {
+    [...notifs].sort((a, b) => (readIds.has(a.id) ? 1 : 0) - (readIds.has(b.id) ? 1 : 0)).forEach((n) => {
+      const leido = readIds.has(n.id);
       const card = document.createElement('div');
       card.className = 'wam-aviso ' + n.tipo + (readIds.has(n.id) ? ' read' : '');
       const h = document.createElement('b');
@@ -825,7 +826,10 @@
       p.textContent = n.mensaje;
       const meta = document.createElement('div');
       meta.className = 'wam-hint';
-      meta.textContent = fmtAviso(n.fecha);
+      const st = document.createElement('span');
+      st.className = 'wam-st ' + (leido ? 'read' : 'new');
+      st.textContent = leido ? '✓ Leído' : '● Nuevo';
+      meta.append(st, ' · ' + fmtAviso(n.fecha));
       card.append(h, tag, p, meta);
       const url = safeUrl(n.link);
       if (url) {
@@ -833,13 +837,11 @@
         l.href = url; l.target = '_blank'; l.rel = 'noopener noreferrer'; l.textContent = 'Abrir enlace';
         card.appendChild(l);
       }
-      if (!readIds.has(n.id)) {
-        const r = document.createElement('a');
-        r.className = 'wam-markread';
-        r.textContent = 'Marcar como leído';
-        r.onclick = () => { readIds.add(n.id); saveRead(); renderNotifs(); };
-        card.appendChild(r);
-      }
+      const r = document.createElement('a');
+      r.className = 'wam-markread';
+      r.textContent = leido ? 'Marcar como no leído' : 'Marcar como leído';
+      r.onclick = () => { leido ? readIds.delete(n.id) : readIds.add(n.id); saveRead(); renderNotifs(); };
+      card.appendChild(r);
       box.appendChild(card);
     });
   };

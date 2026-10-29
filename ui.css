@@ -124,3 +124,8 @@ details label{display:flex;justify-content:space-between;align-items:center;marg
 .wam-aviso em{position:absolute;top:10px;right:12px;font-style:normal;font-size:11px;color:var(--sub)}
 .wam-aviso p{margin:6px 0;white-space:pre-wrap;word-break:break-word}
 .wam-aviso>a{display:inline-block;margin-right:12px;color:var(--green);cursor:pointer;font-size:13px}
+
+.wam-st{font-weight:600}
+.wam-st.new{color:var(--green)}
+.wam-st.read{color:var(--sub)}
+.wam-aviso:not(.read){box-shadow:0 0 0 1px var(--green) inset}
