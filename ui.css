@@ -112,3 +112,15 @@ details label{display:flex;justify-content:space-between;align-items:center;marg
 
 .wam-resume{border:1px solid var(--green);margin-bottom:6px}
 .wam-resume .wam-row{margin-top:8px}
+.wam-badge{display:inline-block;min-width:17px;margin-left:5px;padding:0 5px;border-radius:9px;background:var(--green);color:#fff;font-size:11px;font-weight:600;line-height:17px}
+.wam-avbar{margin:8px 14px 0;padding:8px 12px;border-radius:10px;background:var(--bubble);font-size:13px}
+.wam-avbar.urgent{background:#ea003826}
+.wam-avbar a{cursor:pointer;color:var(--text);font-weight:500}
+.wam-aviso{position:relative;padding:10px 12px;margin-top:10px;border-radius:10px;background:var(--input);border-left:4px solid #3b82f6}
+.wam-aviso.aviso{border-left-color:#f59e0b}
+.wam-aviso.importante{border-left-color:var(--err)}
+.wam-aviso.read{opacity:.6}
+.wam-aviso b{display:block;margin-right:80px}
+.wam-aviso em{position:absolute;top:10px;right:12px;font-style:normal;font-size:11px;color:var(--sub)}
+.wam-aviso p{margin:6px 0;white-space:pre-wrap;word-break:break-word}
+.wam-aviso>a{display:inline-block;margin-right:12px;color:var(--green);cursor:pointer;font-size:13px}

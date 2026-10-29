@@ -32,3 +32,24 @@ chrome.runtime.onMessage.addListener((msg, _sender, send) => {
     .catch((e) => send({ error: e.message }));
   return true; // respuesta asíncrona
 });
+
+// Notificaciones del admin: POST /api/notificaciones-whatsapp { token, numero }
+const NOTIFS_URL = 'https://agendaconmigo-api.vercel.app/api/notificaciones-whatsapp';
+chrome.runtime.onMessage.addListener((msg, _sender, send) => {
+  if (!msg) return;
+  if (msg.type === 'wam-notifs') {
+    fetch(NOTIFS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: msg.token, numero: msg.numero }),
+    })
+      .then(async (r) => send({ status: r.status, data: await r.json().catch(() => ({})) }))
+      .catch((e) => send({ error: e.message }));
+    return true; // respuesta asíncrona
+  }
+  if (msg.type === 'wam-badge') {
+    // número de avisos sin leer sobre el icono de la extensión
+    chrome.action.setBadgeBackgroundColor({ color: msg.urgent ? '#ea0038' : '#00a884' });
+    chrome.action.setBadgeText({ text: msg.count > 0 ? String(Math.min(msg.count, 99)) : '' });
+  }
+});

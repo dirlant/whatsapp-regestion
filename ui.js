@@ -95,10 +95,13 @@
       </div>
     </div>
 
+    <div id="wam-avbar" class="wam-avbar" hidden></div>
+
     <div class="wam-tabbar wam-seg">
       <button data-tab="env" class="on">Envío</button>
       <button data-tab="msg">Mensajes</button>
       <button data-tab="met">Métricas</button>
+      <button data-tab="avi">Avisos<b id="wam-avibadge" class="wam-badge" hidden></b></button>
     </div>
 
     <div class="wam-body" data-body="env">
@@ -178,6 +181,15 @@
       </div>
     </div>
 
+    <div class="wam-body" data-body="avi" hidden>
+      <h4>Avisos</h4>
+      <div class="wam-card">
+        <div class="wam-sum"><span id="wam-avinfo">Sin avisos.</span>
+          <span><a id="wam-avrefresh">Actualizar</a> · <a id="wam-avreadall">Marcar todos como leídos</a></span></div>
+        <div id="wam-avlist"></div>
+      </div>
+    </div>
+
     <div class="wam-body" data-body="met" hidden>
       <h4>Resumen</h4>
       <div class="wam-card">
@@ -217,6 +229,7 @@
       panel.querySelectorAll('.wam-tabbar button').forEach((x) => x.classList.toggle('on', x === b));
       panel.querySelectorAll('[data-body]').forEach((d) => (d.hidden = d.dataset.body !== b.dataset.tab));
       if (b.dataset.tab === 'met') renderMetrics();
+      if (b.dataset.tab === 'avi') { renderNotifs(); fetchNotifs(true); }
     };
   });
   chrome.runtime.onMessage.addListener((m) => {
@@ -736,6 +749,7 @@
       const me = { number: await myNumber() };
       if (!me.number) { lic.reason = 'No se pudo leer tu número de WhatsApp. Inicia sesión en WhatsApp Web y recarga la página.'; lic.valid = false; return false; }
       lic.number = me.number;
+      fetchNotifs(); // avisos del administrador (no bloquea la validación)
       const r = await fetchLicense(lic.token, lic.number);
       lic.detail = r.error
         ? 'Error de conexión: ' + r.error
@@ -768,6 +782,87 @@
     gateOpen = false;
     await checkLicense();
   };
+
+  // ---------- avisos del administrador (módulo "Notificaciones Bot" del admin de Agendaconmigo) ----------
+  let notifs = [];
+  let readIds = new Set();
+  let lastNotifFetch = 0;
+  const TIPO_LABEL = { info: 'Información', aviso: 'Aviso', importante: 'Importante' };
+  const saveRead = () => chrome.storage.local.set({ wamRead: [...readIds].slice(-500) });
+  const unreadList = () => notifs.filter((n) => !readIds.has(n.id));
+  const safeUrl = (u) => (/^https?:\/\//i.test(String(u || '')) ? String(u) : '');
+  const fmtAviso = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); };
+
+  const renderNotifs = () => {
+    const un = unreadList();
+    const urgent = un.some((n) => n.tipo === 'importante');
+    const badge = $('#wam-avibadge');
+    badge.hidden = !un.length;
+    badge.textContent = un.length;
+    const bar = $('#wam-avbar');
+    bar.hidden = !un.length;
+    bar.className = 'wam-avbar' + (urgent ? ' urgent' : '');
+    bar.textContent = '';
+    if (un.length) {
+      const a = document.createElement('a');
+      a.textContent = 'Tienes ' + un.length + (un.length === 1 ? ' aviso sin leer' : ' avisos sin leer') + ' — Ver';
+      a.onclick = () => panel.querySelector('.wam-tabbar button[data-tab="avi"]').click();
+      bar.appendChild(a);
+    }
+    try { chrome.runtime.sendMessage({ type: 'wam-badge', count: un.length, urgent }); } catch {}
+
+    $('#wam-avinfo').textContent = notifs.length ? notifs.length + ' aviso(s) · ' + un.length + ' sin leer' : 'Sin avisos.';
+    const box = $('#wam-avlist');
+    box.innerHTML = '';
+    notifs.forEach((n) => {
+      const card = document.createElement('div');
+      card.className = 'wam-aviso ' + n.tipo + (readIds.has(n.id) ? ' read' : '');
+      const h = document.createElement('b');
+      h.textContent = n.titulo;
+      const tag = document.createElement('em');
+      tag.textContent = TIPO_LABEL[n.tipo] || '';
+      const p = document.createElement('p');
+      p.textContent = n.mensaje;
+      const meta = document.createElement('div');
+      meta.className = 'wam-hint';
+      meta.textContent = fmtAviso(n.fecha);
+      card.append(h, tag, p, meta);
+      const url = safeUrl(n.link);
+      if (url) {
+        const l = document.createElement('a');
+        l.href = url; l.target = '_blank'; l.rel = 'noopener noreferrer'; l.textContent = 'Abrir enlace';
+        card.appendChild(l);
+      }
+      if (!readIds.has(n.id)) {
+        const r = document.createElement('a');
+        r.className = 'wam-markread';
+        r.textContent = 'Marcar como leído';
+        r.onclick = () => { readIds.add(n.id); saveRead(); renderNotifs(); };
+        card.appendChild(r);
+      }
+      box.appendChild(card);
+    });
+  };
+
+  // Pide los avisos al backend (por el service worker). Si falla, se conservan los últimos guardados.
+  const fetchNotifs = async (force = false) => {
+    if (!lic.token || !lic.number) return;
+    if (!force && Date.now() - lastNotifFetch < 60000) return;
+    lastNotifFetch = Date.now();
+    const r = await new Promise((resolve) =>
+      chrome.runtime.sendMessage({ type: 'wam-notifs', token: lic.token, numero: lic.number }, (x) => resolve(x || { error: chrome.runtime.lastError?.message || 'sin respuesta' })));
+    if (r.status === 200 && r.data && Array.isArray(r.data.notificaciones)) {
+      notifs = r.data.notificaciones
+        .filter((n) => n && n.id && n.titulo)
+        .map((n) => ({ ...n, tipo: TIPO_LABEL[n.tipo] ? n.tipo : 'info' }))
+        .slice(0, 100);
+      chrome.storage.local.set({ wamNotifs: notifs });
+      renderNotifs();
+    }
+  };
+  $('#wam-avrefresh').onclick = () => fetchNotifs(true);
+  $('#wam-avreadall').onclick = () => { notifs.forEach((n) => readIds.add(n.id)); saveRead(); renderNotifs(); };
+  setInterval(() => fetchNotifs(), 15 * 60 * 1000);
 
   // ---------- envío ----------
   const fmt = (s) => { s = Math.round(s); return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`; };
@@ -976,6 +1071,11 @@
   });
   chrome.storage.local.get('wamJob').then(({ wamJob }) => {
     if (wamJob && Array.isArray(wamJob.queue) && wamJob.queue.length) { job = wamJob; renderResume(); }
+  });
+  chrome.storage.local.get(['wamRead', 'wamNotifs']).then(({ wamRead, wamNotifs }) => {
+    if (Array.isArray(wamRead)) readIds = new Set(wamRead);
+    if (Array.isArray(wamNotifs)) notifs = wamNotifs; // se muestran al instante, aunque no haya conexión
+    renderNotifs();
   });
   chrome.storage.local.get('wamLog').then(({ wamLog }) => { if (Array.isArray(wamLog)) sendLog = wamLog; });
   chrome.storage.local.get('wamCfg').then(({ wamCfg }) => {
