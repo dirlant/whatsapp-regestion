@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "WA Envíos Masivos",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Envío masivo en WhatsApp Web con intervalos y pausas inteligentes. Lee etiquetas y grupos.",
   "permissions": [
     "storage",
@@ -58,7 +58,8 @@
       "resources": [
         "icons/icon48.png",
         "icons/mark.png",
-        "icons/logo.png"
+        "icons/logo.png",
+        "icons/wordmark.png"
       ],
       "matches": [
         "https://web.whatsapp.com/*"
