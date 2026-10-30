@@ -41,7 +41,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, send) => {
     fetch(NOTIFS_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: msg.token, numero: msg.numero }),
+      body: JSON.stringify({ token: msg.token, numero: msg.numero, ...(msg.leida ? { leida: String(msg.leida) } : {}) }),
     })
       .then(async (r) => send({ status: r.status, data: await r.json().catch(() => ({})) }))
       .catch((e) => send({ error: e.message }));

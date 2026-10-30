@@ -789,7 +789,9 @@
   let lastNotifFetch = 0;
   const TIPO_LABEL = { info: 'Información', aviso: 'Aviso', importante: 'Importante' };
   const saveRead = () => chrome.storage.local.set({ wamRead: [...readIds].slice(-500) });
-  const unreadList = () => notifs.filter((n) => !readIds.has(n.id));
+  // el servidor es la fuente de verdad (n.leida); readIds es solo la marca local hasta que el servidor confirma
+  const isRead = (n) => !!n.leida || readIds.has(n.id);
+  const unreadList = () => notifs.filter((n) => !isRead(n));
   const safeUrl = (u) => (/^https?:\/\//i.test(String(u || '')) ? String(u) : '');
   const fmtAviso = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); };
 
@@ -814,10 +816,10 @@
     $('#wam-avinfo').textContent = notifs.length ? notifs.length + ' aviso(s) · ' + un.length + ' sin leer' : 'Sin avisos.';
     const box = $('#wam-avlist');
     box.innerHTML = '';
-    [...notifs].sort((a, b) => (readIds.has(a.id) ? 1 : 0) - (readIds.has(b.id) ? 1 : 0)).forEach((n) => {
-      const leido = readIds.has(n.id);
+    [...notifs].sort((a, b) => (isRead(a) ? 1 : 0) - (isRead(b) ? 1 : 0)).forEach((n) => {
+      const leido = isRead(n);
       const card = document.createElement('div');
-      card.className = 'wam-aviso ' + n.tipo + (readIds.has(n.id) ? ' read' : '');
+      card.className = 'wam-aviso ' + n.tipo + (leido ? ' read' : '');
       const h = document.createElement('b');
       h.textContent = n.titulo;
       const tag = document.createElement('em');
@@ -837,33 +839,56 @@
         l.href = url; l.target = '_blank'; l.rel = 'noopener noreferrer'; l.textContent = 'Abrir enlace';
         card.appendChild(l);
       }
-      const r = document.createElement('a');
-      r.className = 'wam-markread';
-      r.textContent = leido ? 'Marcar como no leído' : 'Marcar como leído';
-      r.onclick = () => { leido ? readIds.delete(n.id) : readIds.add(n.id); saveRead(); renderNotifs(); };
-      card.appendChild(r);
+      if (!leido) {
+        const r = document.createElement('a');
+        r.className = 'wam-markread';
+        r.textContent = 'Marcar como leído';
+        r.onclick = () => markRead([n.id]);
+        card.appendChild(r);
+      }
       box.appendChild(card);
     });
   };
 
-  // Pide los avisos al backend (por el service worker). Si falla, se conservan los últimos guardados.
-  const fetchNotifs = async (force = false) => {
-    if (!lic.token || !lic.number) return;
-    if (!force && Date.now() - lastNotifFetch < 60000) return;
+  // Pide los avisos al backend (por el service worker). Con markId también marca ese aviso como leído
+  // en el servidor (POST con "leida": id, idempotente). Si falla, se conservan los últimos guardados.
+  const markAttempts = new Map(); // id -> intentos de sincronizar la lectura (máx. 3, para no insistir sin fin)
+  const fetchNotifs = async (force = false, markId = '') => {
+    if (!lic.token || !lic.number) return false;
+    if (!force && Date.now() - lastNotifFetch < 60000) return false;
+    if (!force) markAttempts.clear(); // cada consulta periódica vuelve a intentar las lecturas pendientes
     lastNotifFetch = Date.now();
+    const payload = { type: 'wam-notifs', token: lic.token, numero: lic.number };
+    if (markId) payload.leida = markId;
     const r = await new Promise((resolve) =>
-      chrome.runtime.sendMessage({ type: 'wam-notifs', token: lic.token, numero: lic.number }, (x) => resolve(x || { error: chrome.runtime.lastError?.message || 'sin respuesta' })));
-    if (r.status === 200 && r.data && Array.isArray(r.data.notificaciones)) {
-      notifs = r.data.notificaciones
-        .filter((n) => n && n.id && n.titulo)
-        .map((n) => ({ ...n, tipo: TIPO_LABEL[n.tipo] ? n.tipo : 'info' }))
-        .slice(0, 100);
-      chrome.storage.local.set({ wamNotifs: notifs });
-      renderNotifs();
+      chrome.runtime.sendMessage(payload, (x) => resolve(x || { error: chrome.runtime.lastError?.message || 'sin respuesta' })));
+    if (!(r.status === 200 && r.data && Array.isArray(r.data.notificaciones))) return false;
+    notifs = r.data.notificaciones
+      .filter((n) => n && n.id && n.titulo)
+      .map((n) => ({ ...n, leida: n.leida === true, tipo: TIPO_LABEL[n.tipo] ? n.tipo : 'info' }))
+      .slice(0, 100);
+    // lo que el servidor ya confirmó como leído deja de ser una marca local pendiente
+    notifs.forEach((n) => { if (n.leida) { readIds.delete(n.id); markAttempts.delete(n.id); } });
+    saveRead();
+    chrome.storage.local.set({ wamNotifs: notifs });
+    renderNotifs();
+    // avisos que el usuario marcó pero el servidor aún no registra (p. ej. se marcó sin conexión): se reintenta uno
+    if (!markId) {
+      const pend = notifs.find((n) => !n.leida && readIds.has(n.id) && (markAttempts.get(n.id) || 0) < 3);
+      if (pend) { markAttempts.set(pend.id, (markAttempts.get(pend.id) || 0) + 1); fetchNotifs(true, pend.id); }
     }
+    return true;
+  };
+
+  // Marca avisos como leídos: se ve al instante y se confirma en el servidor, uno por uno
+  const markRead = async (ids) => {
+    ids.forEach((id) => readIds.add(id));
+    saveRead();
+    renderNotifs();
+    for (const id of ids) await fetchNotifs(true, id);
   };
   $('#wam-avrefresh').onclick = () => fetchNotifs(true);
-  $('#wam-avreadall').onclick = () => { notifs.forEach((n) => readIds.add(n.id)); saveRead(); renderNotifs(); };
+  $('#wam-avreadall').onclick = () => markRead(unreadList().map((n) => n.id));
   setInterval(() => fetchNotifs(), 15 * 60 * 1000);
 
   // ---------- envío ----------
