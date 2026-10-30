@@ -62,15 +62,21 @@
       return r ? { id: toId(r.wid) } : null;
     },
 
-    // ----- IA: chats individuales no leídos con sus últimos mensajes (se leen SIN marcarlos como leídos) -----
-    // scope: 'etiquetas' (solo chats que tengan alguna de labelIds) | 'nuevos' (sin conversación previa) | 'todos'
-    async iaCandidates({ scope, labelIds, limit }) {
-      const opts = { onlyUsers: true, onlyWithUnreadMessage: true };
+    // ----- IA: chats individuales (leídos o no) con sus últimos mensajes. Se leen SIN marcarlos como leídos -----
+    // scope: 'etiquetas' -> chats que tengan alguna de labelIds
+    //        'nuevos'    -> conversaciones nuevas (el negocio nunca escribió) + las que la IA ya viene atendiendo ('incluir')
+    // maxAgeSec: solo chats con actividad en las últimas N horas (evita contestar conversaciones viejas)
+    async iaCandidates({ scope, labelIds, limit, maxAgeSec, incluir }) {
+      const opts = { onlyUsers: true };
       if (scope === 'etiquetas') {
         if (!labelIds || !labelIds.length) return [];
         opts.withLabels = labelIds.map(String);
       }
-      const chats = await WPP.chat.list(opts);
+      let chats = await WPP.chat.list(opts);
+      const ahora = Math.floor(Date.now() / 1000);
+      if (maxAgeSec) chats = chats.filter((c) => !c.t || ahora - Number(c.t) <= maxAgeSec);
+      chats.sort((a, b) => Number(b.t || 0) - Number(a.t || 0)); // los más recientes primero
+      const forzados = new Set((incluir || []).map(String));
       let miNumero = '';
       try { miNumero = String(WPP.conn.getMyUserId().user || ''); } catch {}
       const out = [];
@@ -89,12 +95,13 @@
           t: Number(m.t || 0),
         })).sort((a, b) => a.t - b.t);
         const nuevo = lista.length <= 20 && !lista.some((m) => m.de === 'yo'); // historial completo y sin nada enviado por el negocio
-        if (scope === 'nuevos' && !nuevo) continue;
+        if (scope === 'nuevos' && !nuevo && !forzados.has(id)) continue;
         out.push({
           id,
           name: c.name || c.formattedTitle || (c.contact && (c.contact.name || c.contact.pushname)) || id.split('@')[0],
           labels: (c.labels || []).map(String),
           nuevo,
+          unread: Number(c.unreadCount || 0),
           msgs: lista.slice(-20),
         });
       }
@@ -121,6 +128,24 @@
       return { id: res?.id };
     },
   };
+
+  // Avisa a la interfaz cuando llega un mensaje de un cliente (no envía su contenido).
+  let hooked = false;
+  const hookEvents = () => {
+    if (hooked) return;
+    hooked = true;
+    try {
+      WPP.on('chat.new_message', (m) => {
+        try {
+          if (!m || (m.id && m.id.fromMe) || m.isNewMsg === false) return;
+          window.postMessage({ tag: TAG, dir: 'evt', event: 'new_message' }, '*');
+        } catch {}
+      });
+    } catch {}
+  };
+  try { if (ready()) hookEvents(); else WPP.webpack.onFullReady(hookEvents); } catch {}
+  // por si la librería terminó de cargar sin avisar: se reintenta hasta engancharse
+  const retry = setInterval(() => { if (hooked) clearInterval(retry); else if (ready()) { hookEvents(); clearInterval(retry); } }, 2000);
 
   window.addEventListener('message', async (ev) => {
     const m = ev.data;

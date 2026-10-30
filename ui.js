@@ -62,7 +62,7 @@
     hourTo: 20,
     source: 'label',
     cc: '',
-    ia: { on: false, mode: 'sugerencia', scope: 'etiquetas', labels: [], instrucciones: '', maxDia: 100, consent: false },
+    ia: { on: false, mode: 'sugerencia', scope: 'etiquetas', labels: [], instrucciones: '', maxDia: 100, horas: 12, consent: false },
     messages: [...EXAMPLE_MSGS],
   };
   let cfg = { ...DEFAULTS };
@@ -239,11 +239,10 @@
 
         <div class="wam-hint"><b>A quién atiende</b></div>
         <select id="iaScope">
-          <option value="etiquetas">Solo chats con las etiquetas que marque</option>
-          <option value="nuevos">Solo mensajes nuevos sin conversación previa</option>
-          <option value="todos">Todos los chats no leídos</option>
+          <option value="etiquetas">Chats con las etiquetas que marque (leídos o no)</option>
+          <option value="nuevos">Mensajes nuevos: conversaciones nuevas (leídos o no)</option>
         </select>
-        <p class="wam-hint">Siempre solo chats individuales con mensajes no leídos (no grupos).</p>
+        <p class="wam-hint">La IA mantiene la conversación: contesta cada mensaje del cliente, leído o no, mientras el último mensaje sea suyo. Solo chats individuales (no grupos). Si una persona del equipo responde en un chat, la IA se aparta de ese chat 24 horas.</p>
 
         <div class="wam-hint"><b>Etiquetas que usará la IA</b> (elige al menos una)</div>
         <div id="wam-ialabels" class="wam-list"></div>
@@ -251,6 +250,7 @@
         <div class="wam-hint" style="margin-top:10px"><b>Instrucciones para la IA</b></div>
         <textarea id="iaInstr" rows="6" maxlength="3000" placeholder="Qué vendes o qué servicio das, tono, precios, horarios, qué NO debe hacer… La IA solo usa esta información; si no está aquí, pasa el chat a una persona."></textarea>
 
+        <label>Responder solo mensajes de las últimas (horas) <span><input type="number" id="iaHoras" min="1" max="168"></span></label>
         <label>Máx. respuestas automáticas por día <span><input type="number" id="iaMax" min="1"></span></label>
         <button id="wam-ianow" class="wam-btn alt">Revisar ahora</button>
       </div>
@@ -1162,13 +1162,21 @@
   let iaHuman = []; // chats que necesitan a una persona
   let iaCount = { day: 0, n: 0 }; // respuestas automáticas enviadas hoy
   let iaPausedDay = 0; // día en que el servidor avisó que se alcanzó el tope de consultas
+  let iaEngaged = {}; // chatId -> true: conversaciones que la IA viene atendiendo (se continúan aunque ya no sean "nuevas")
+  let iaSentT = {}; // chatId -> hora (segundos) del último mensaje enviado por la IA
+  let iaPause = {}; // chatId -> hasta cuándo (ms) la IA se aparta porque una persona respondió
+  const IA_PAUSE_MS = 24 * 3600 * 1000;
+  let iaAgain = false; // llegó algo mientras se revisaba: se vuelve a revisar al terminar
+  let iaKickT = null;
 
   const iaDay = () => dayKey(Date.now());
   const iaToday = () => (iaCount.day === iaDay() ? iaCount.n : 0);
   const iaPersist = () => {
     const keys = Object.keys(iaSeen);
     if (keys.length > 500) keys.slice(0, keys.length - 500).forEach((k) => delete iaSeen[k]);
-    chrome.storage.local.set({ wamIa: { seen: iaSeen, sug: iaSug.slice(0, 50), human: iaHuman.slice(0, 50), count: iaCount } });
+    [iaEngaged, iaSentT].forEach((o) => { const k = Object.keys(o); if (k.length > 500) k.slice(0, k.length - 500).forEach((x) => delete o[x]); });
+    Object.keys(iaPause).forEach((k) => { if (iaPause[k] < Date.now()) delete iaPause[k]; });
+    chrome.storage.local.set({ wamIa: { seen: iaSeen, sug: iaSug.slice(0, 50), human: iaHuman.slice(0, 50), count: iaCount, engaged: iaEngaged, sentT: iaSentT, pause: iaPause } });
   };
   const setIaStatus = (t) => { $('#wam-iastatus').textContent = t; };
   const iaCanRun = () => !!(cfg.ia.on && lic.valid && cfg.ia.labels.length > 0);
@@ -1195,6 +1203,7 @@
         cfg.ia.labels = i.checked ? [...new Set([...cfg.ia.labels, id])] : cfg.ia.labels.filter((x) => x !== id);
         if (!cfg.ia.labels.length && cfg.ia.on) { cfg.ia.on = false; $('#iaOn').checked = false; iaWarn('La IA se apagó: tiene que haber al menos una etiqueta.'); }
         save();
+        if (cfg.ia.on) iaScan(true);
       };
       const s = document.createElement('span');
       s.textContent = lb.name;
@@ -1261,6 +1270,7 @@
     $('#iaScope').value = cfg.ia.scope;
     $('#iaInstr').value = cfg.ia.instrucciones;
     $('#iaMax').value = cfg.ia.maxDia;
+    $('#iaHoras').value = cfg.ia.horas;
     panel.querySelectorAll('#wam-iamode button').forEach((b) => b.classList.toggle('on', b.dataset.m === cfg.ia.mode));
     renderIaLabels(); renderIaSug(); renderIaHuman();
   };
@@ -1273,6 +1283,9 @@
   };
   const iaDeliver = async (chat, text, labelId) => {
     await call('send', { to: chat.id, text, typingMs: typingMs(text) });
+    iaSentT[chat.id] = Math.floor(Date.now() / 1000); // para distinguir luego si una persona del equipo tomó el chat
+    iaEngaged[chat.id] = true; // la IA continúa esta conversación aunque deje de ser "nueva"
+    iaPersist();
     await iaApplyLabel(chat.id, labelId, chat.labels);
   };
   const iaApprove = async (s, text) => {
@@ -1294,6 +1307,7 @@
       type: 'wam-ia',
       payload: {
         token: lic.token, numero: lic.number, contacto: c.name, mensajes,
+        es_nuevo: !!c.nuevo,
         etiquetas: cfg.ia.labels.map((id) => ({ id, nombre: iaLabelName(id) })),
         instrucciones: cfg.ia.instrucciones,
       },
@@ -1312,7 +1326,7 @@
 
   // ----- revisión de chats -----
   const iaScan = async (manual = false) => {
-    if (iaBusy) return;
+    if (iaBusy) { iaAgain = true; return; } // se repite apenas termine la revisión en curso
     if (!iaCanRun()) { if (manual) setIaStatus('Activa la IA y elige al menos una etiqueta.'); return; }
     const auto = cfg.ia.mode === 'auto';
     if (iaPausedDay === iaDay()) return setIaStatus('Se alcanzó el tope diario de consultas de IA. Continúa mañana.');
@@ -1320,20 +1334,31 @@
     if (auto && hoursActive() && !inWindow()) return setIaStatus('Fuera del horario (' + cfg.hourFrom + ':00–' + cfg.hourTo + ':00).');
     if (auto && iaToday() >= cfg.ia.maxDia) return setIaStatus('Límite diario de respuestas automáticas alcanzado (' + iaToday() + ').');
     iaBusy = true;
+    let hayMas = false; // quedaron chats pendientes por el tope de consultas por revisión
     try {
       const st = await call('status');
-      if (!st.ready) return setIaStatus('Esperando a que WhatsApp termine de cargar…');
-      setIaStatus('Revisando chats no leídos…');
-      const cands = await call('iaCandidates', { scope: cfg.ia.scope, labelIds: cfg.ia.labels, limit: 40 });
+      if (!st.ready) { setTimeout(() => iaScan(false), 5000); return setIaStatus('Esperando a que WhatsApp termine de cargar…'); }
+      setIaStatus('Revisando chats…');
+      const cands = await call('iaCandidates', { scope: cfg.ia.scope, labelIds: cfg.ia.labels, limit: 60, maxAgeSec: cfg.ia.horas * 3600, incluir: Object.keys(iaEngaged) });
       let asked = 0;
       let nuevas = 0;
       let aviso = ''; // problema de esta revisión: se muestra en lugar del resumen
       for (const c of cands) {
         if (!iaCanRun() || run.state === 'running') break;
         const last = c.msgs[c.msgs.length - 1];
+        if (iaPause[c.id] && iaPause[c.id] > Date.now()) continue; // una persona tomó este chat
+        const enviadoIA = iaSentT[c.id];
+        if (enviadoIA && c.msgs.some((m) => m.de === 'yo' && m.t > enviadoIA + 20)) {
+          // alguien del equipo escribió después de la IA: la IA se aparta de este chat
+          iaPause[c.id] = Date.now() + IA_PAUSE_MS;
+          delete iaEngaged[c.id];
+          log('IA en pausa 24 h en ' + c.name + ': una persona respondió');
+          continue;
+        }
         if (!last || last.de !== 'cliente') continue; // ya respondió el negocio
+        if (Date.now() / 1000 - last.t > cfg.ia.horas * 3600) continue; // mensaje demasiado viejo
         if ((iaSeen[c.id] || 0) >= last.t) continue; // ya atendido
-        if (asked >= IA_MAX_PER_SCAN) break; // el resto queda para la siguiente revisión
+        if (asked >= IA_MAX_PER_SCAN) { hayMas = true; break; } // el resto sigue en la próxima revisión (que arranca enseguida)
         if (!last.texto || last.tipo !== 'chat') {
           iaAddHuman(c, 'El último mensaje no es de texto (foto, audio, sticker…)', last.t);
           iaSeen[c.id] = last.t;
@@ -1347,7 +1372,8 @@
         if (r.data.valida === false) { aviso = 'Licencia: ' + (LIC_REASONS[r.data.motivo] || 'no válida'); break; }
         iaSeen[c.id] = last.t;
         const d = r.data;
-        if (d.requiere_humano || !d.respuesta) { iaAddHuman(c, d.motivo || 'La IA prefirió que responda una persona', last.t); continue; }
+        if (d.sin_respuesta) continue; // la charla llegó a un cierre ("gracias", "ok"): no hay nada que contestar
+        if (d.requiere_humano || !d.respuesta) { delete iaEngaged[c.id]; iaAddHuman(c, d.motivo || 'La IA prefirió que responda una persona', last.t); continue; }
         if (!auto) {
           iaSug = iaSug.filter((x) => x.chatId !== c.id);
           iaSug.unshift({ chatId: c.id, name: c.name, labels: c.labels, lastText: last.texto.slice(0, 200), respuesta: d.respuesta, etiquetaId: d.etiqueta_id || '', t: last.t });
@@ -1355,7 +1381,7 @@
           continue;
         }
         // automático: espera aleatoria antes de contestar, como una persona
-        if (!(await iaWait(rnd(15, 60), 'Respondiendo a ' + c.name + ' en'))) { delete iaSeen[c.id]; break; }
+        if (!(await iaWait(rnd(8, 25), 'Respondiendo a ' + c.name + ' en'))) { delete iaSeen[c.id]; break; }
         try {
           await iaDeliver(c, d.respuesta, d.etiqueta_id);
           iaCount = { day: iaDay(), n: iaToday() + 1 };
@@ -1371,8 +1397,17 @@
       setIaStatus('Error: ' + e.message);
     } finally {
       iaBusy = false;
+      if (iaAgain) { iaAgain = false; setTimeout(() => iaScan(false), 1500); }
+      else if (hayMas) setTimeout(() => iaScan(false), 3000);
     }
   };
+
+  // Reacción inmediata: al llegar un mensaje se revisa en ~2,5 s (sin esperar al temporizador); varios seguidos se juntan
+  const iaKick = () => { if (!iaCanRun()) return; clearTimeout(iaKickT); iaKickT = setTimeout(() => iaScan(false), 2500); };
+  window.addEventListener('message', (ev) => {
+    const m = ev.data;
+    if (ev.source === window && m && m.tag === TAG && m.dir === 'evt' && m.event === 'new_message') iaKick();
+  });
 
   // ----- controles -----
   $('#iaOn').onchange = (e) => {
@@ -1396,9 +1431,11 @@
       cfg.ia.mode = b.dataset.m;
       save();
       syncIa();
+      if (cfg.ia.on) iaScan(true);
     };
   });
-  $('#iaScope').onchange = (e) => { cfg.ia.scope = e.target.value; save(); };
+  $('#iaScope').onchange = (e) => { cfg.ia.scope = e.target.value; save(); if (cfg.ia.on) iaScan(true); };
+  $('#iaHoras').onchange = (e) => { cfg.ia.horas = Math.min(168, Math.max(1, +e.target.value || 12)); e.target.value = cfg.ia.horas; save(); if (cfg.ia.on) iaScan(true); };
   $('#iaInstr').oninput = (e) => { cfg.ia.instrucciones = e.target.value.slice(0, 3000); save(); };
   $('#iaMax').onchange = (e) => { cfg.ia.maxDia = Math.max(1, +e.target.value || 1); e.target.value = cfg.ia.maxDia; save(); };
   $('#wam-ianow').onclick = () => iaScan(true);
@@ -1421,6 +1458,7 @@
     if (!wamIa) return;
     iaSeen = wamIa.seen || {}; iaSug = Array.isArray(wamIa.sug) ? wamIa.sug : []; iaHuman = Array.isArray(wamIa.human) ? wamIa.human : [];
     iaCount = wamIa.count || iaCount;
+    iaEngaged = wamIa.engaged || {}; iaSentT = wamIa.sentT || {}; iaPause = wamIa.pause || {};
     renderIaSug(); renderIaHuman();
   });
   chrome.storage.local.get('wamLog').then(({ wamLog }) => { if (Array.isArray(wamLog)) sendLog = wamLog; });
@@ -1438,6 +1476,8 @@
     if (cfg.source !== 'excel') cfg.source = 'label';
     cfg.ia = { ...DEFAULTS.ia, ...(wamCfg && wamCfg.ia ? wamCfg.ia : {}) };
     if (!Array.isArray(cfg.ia.labels)) cfg.ia.labels = [];
+    if (cfg.ia.scope !== 'nuevos') cfg.ia.scope = 'etiquetas'; // ya no existe "todos": hay que elegir etiquetas o mensajes nuevos
+    cfg.ia.horas = Math.min(168, Math.max(1, Number(cfg.ia.horas) || 12));
     cfg.ia.labels = cfg.ia.labels.map(String);
     syncIa();
     syncFields();
@@ -1450,7 +1490,7 @@
     try {
       const st = await call('status');
       setConn(st.ready);
-      if (st.ready) { clearInterval(poll); refreshData(); checkLicense(); }
+      if (st.ready) { clearInterval(poll); refreshData(); checkLicense().then(() => iaScan(false)); }
       else if (!diagShown && Date.now() - t0 > 25000) {
         diagShown = true;
         log(`WhatsApp no termina de cargar la librería interna (WPP=${st.hasWPP}, isReady=${st.isReady}, isFullReady=${st.isFullReady}, inyectada=${st.injected}, cargador=${st.loaderType}, globales=[${st.has}], otras=[${st.keys}], WhatsApp Web ${st.waVersion || '?'}, librería ${st.version || '?'}). Recarga la página con Ctrl+Shift+R.`, 'err');
