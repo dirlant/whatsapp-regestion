@@ -233,11 +233,11 @@
         <select id="iaScope">
           <option value="etiquetas">Chats con las etiquetas que marque (leídos o no)</option>
           <option value="nuevos">Mensajes nuevos: conversaciones nuevas (leídos o no)</option>
-          <option value="palabras">Palabras clave: cuando el cliente escriba alguna</option>
+          <option value="palabras">Palabras claves: se activa cuando el cliente escriba alguna</option>
         </select>
-        <div class="wam-hint" style="margin-top:10px"><b>Palabras clave en mensajes entrantes</b> (separadas por coma, o una por línea)</div>
+        <div class="wam-hint" style="margin-top:10px"><b>Palabras claves para activar al asistente</b> (separadas por coma, o una por línea)</div>
         <textarea id="iaKw" rows="3" maxlength="2000" placeholder="precio, cuánto cuesta, cita, información, promoción"></textarea>
-        <label class="wam-sw" id="wam-iakwextra-row"><span>También responder en cualquier chat cuando un mensaje entrante tenga una palabra clave</span><input type="checkbox" id="iaKwExtra"><i></i></label>
+        <label class="wam-sw" id="wam-iakwextra-row"><span>Activar al asistente en cualquier chat cuando un mensaje entrante contenga una palabra clave</span><input type="checkbox" id="iaKwExtra"><i></i></label>
         <p class="wam-hint" id="wam-iakwhint"></p>
         <p class="wam-hint">Al activarla busca los chats y, si falta tu respuesta (el último mensaje es del cliente), continúa la conversación, leído o no. Solo chats individuales (no grupos). Si una persona del equipo responde en un chat, la IA se aparta de ese chat 24 horas.</p>
 
