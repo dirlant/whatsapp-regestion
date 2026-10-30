@@ -66,17 +66,23 @@
     // scope: 'etiquetas' -> chats que tengan alguna de labelIds
     //        'nuevos'    -> conversaciones nuevas (el negocio nunca escribió) + las que la IA ya viene atendiendo ('incluir')
     // maxAgeSec: solo chats con actividad en las últimas N horas (evita contestar conversaciones viejas)
-    async iaCandidates({ scope, labelIds, limit, maxAgeSec, incluir }) {
+    async iaCandidates({ scope, labelIds, limit, maxAgeSec, incluir, solo }) {
       const opts = { onlyUsers: true };
       if (scope === 'etiquetas') {
         if (!labelIds || !labelIds.length) return [];
         opts.withLabels = labelIds.map(String);
       }
       let chats = await WPP.chat.list(opts);
-      const ahora = Math.floor(Date.now() / 1000);
-      if (maxAgeSec) chats = chats.filter((c) => !c.t || ahora - Number(c.t) <= maxAgeSec);
-      chats.sort((a, b) => Number(b.t || 0) - Number(a.t || 0)); // los más recientes primero
-      chats = chats.slice(0, 300); // tope de chats examinados por revisión (con "sin límite" no se recorren miles)
+      if (solo && solo.length) {
+        // revisión RÁPIDA: solo los chats que acaban de recibir un mensaje (no se leen los demás)
+        const set = new Set(solo.map(String));
+        chats = chats.filter((c) => set.has(toId(c.id)));
+      } else {
+        const ahora = Math.floor(Date.now() / 1000);
+        if (maxAgeSec) chats = chats.filter((c) => !c.t || ahora - Number(c.t) <= maxAgeSec);
+        chats.sort((a, b) => Number(b.t || 0) - Number(a.t || 0)); // los más recientes primero
+        chats = chats.slice(0, 300); // tope de chats examinados por revisión (con "sin límite" no se recorren miles)
+      }
       const forzados = new Set((incluir || []).map(String));
       let miNumero = '';
       try { miNumero = String(WPP.conn.getMyUserId().user || ''); } catch {}
@@ -141,7 +147,7 @@
       WPP.on('chat.new_message', (m) => {
         try {
           if (!m || (m.id && m.id.fromMe) || m.isNewMsg === false) return;
-          window.postMessage({ tag: TAG, dir: 'evt', event: 'new_message' }, '*');
+          window.postMessage({ tag: TAG, dir: 'evt', event: 'new_message', chatId: toId((m.id && m.id.remote) || m.from) }, '*');
         } catch {}
       });
     } catch {}
