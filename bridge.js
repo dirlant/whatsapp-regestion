@@ -62,6 +62,55 @@
       return r ? { id: toId(r.wid) } : null;
     },
 
+    // ----- IA: chats individuales no leídos con sus últimos mensajes (se leen SIN marcarlos como leídos) -----
+    // scope: 'etiquetas' (solo chats que tengan alguna de labelIds) | 'nuevos' (sin conversación previa) | 'todos'
+    async iaCandidates({ scope, labelIds, limit }) {
+      const opts = { onlyUsers: true, onlyWithUnreadMessage: true };
+      if (scope === 'etiquetas') {
+        if (!labelIds || !labelIds.length) return [];
+        opts.withLabels = labelIds.map(String);
+      }
+      const chats = await WPP.chat.list(opts);
+      let miNumero = '';
+      try { miNumero = String(WPP.conn.getMyUserId().user || ''); } catch {}
+      const out = [];
+      for (const c of chats) {
+        if (out.length >= (limit || 40)) break;
+        const id = toId(c.id);
+        if (!id.endsWith('@c.us') && !id.endsWith('@lid')) continue; // solo personas (no grupos, difusiones, estados ni canales)
+        if (miNumero && id.startsWith(miNumero + '@')) continue; // el chat "Tú"
+        if (c.contact && c.contact.isBlocked) continue;
+        let msgs = [];
+        try { msgs = await WPP.chat.getMessages(id, { count: 21 }); } catch { continue; }
+        const lista = (msgs || []).map((m) => ({
+          de: m.id && m.id.fromMe ? 'yo' : 'cliente',
+          tipo: m.type || '',
+          texto: m.type === 'chat' ? String(m.body || '') : String(m.caption || ''),
+          t: Number(m.t || 0),
+        })).sort((a, b) => a.t - b.t);
+        const nuevo = lista.length <= 20 && !lista.some((m) => m.de === 'yo'); // historial completo y sin nada enviado por el negocio
+        if (scope === 'nuevos' && !nuevo) continue;
+        out.push({
+          id,
+          name: c.name || c.formattedTitle || (c.contact && (c.contact.name || c.contact.pushname)) || id.split('@')[0],
+          labels: (c.labels || []).map(String),
+          nuevo,
+          msgs: lista.slice(-20),
+        });
+      }
+      return out;
+    },
+
+    // Pone la etiqueta "add" y quita las de "remove" en un chat (solo WhatsApp Business)
+    async iaSetLabel({ chatId, add, remove }) {
+      const ops = [];
+      if (add) ops.push({ labelId: String(add), type: 'add' });
+      (remove || []).forEach((l) => ops.push({ labelId: String(l), type: 'remove' }));
+      if (!ops.length) return { ok: true };
+      await WPP.labels.addOrRemoveLabels(chatId, ops);
+      return { ok: true };
+    },
+
     async send({ to, text, typingMs }) {
       if (typingMs > 0) {
         try { await WPP.chat.markIsComposing(to, typingMs); } catch {}

@@ -133,3 +133,12 @@ details label{display:flex;justify-content:space-between;align-items:center;marg
 #wam-biglogo{display:block;width:140px;margin:4px auto 8px;padding:8px;border-radius:16px;background:#fff}
 
 #wam-word{height:22px;width:auto;align-self:flex-start;margin-bottom:3px}
+
+.wam-tabbar button{font-size:12.5px;padding:7px 2px}
+#wam-panel h4+.wam-card .wam-hint b{color:var(--text)}
+.wam-iacard{padding:10px;margin-top:10px;border-radius:10px;background:var(--input)}
+.wam-iacard textarea{margin:6px 0;background:var(--card)!important}
+.wam-iacard .wam-row{margin:6px 0 0}
+.wam-iahuman{display:flex;gap:8px;padding:6px 10px;border-bottom:1px solid var(--line);font-size:13px;color:var(--text)}
+.wam-iahuman a{color:var(--err);cursor:pointer}
+#iaScope{max-width:none;width:100%}

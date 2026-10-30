@@ -62,6 +62,7 @@
     hourTo: 20,
     source: 'label',
     cc: '',
+    ia: { on: false, mode: 'sugerencia', scope: 'etiquetas', labels: [], instrucciones: '', maxDia: 100, consent: false },
     messages: [...EXAMPLE_MSGS],
   };
   let cfg = { ...DEFAULTS };
@@ -103,6 +104,7 @@
       <button data-tab="msg">Mensajes</button>
       <button data-tab="met">Métricas</button>
       <button data-tab="avi">Avisos<b id="wam-avibadge" class="wam-badge" hidden></b></button>
+      <button data-tab="ia">IA</button>
     </div>
 
     <div class="wam-body" data-body="env">
@@ -214,6 +216,45 @@
       </div>
     </div>
 
+    <div class="wam-body" data-body="ia" hidden>
+      <h4>Respuestas con IA</h4>
+      <div class="wam-card">
+        <label class="wam-sw"><span>Activar IA</span><input type="checkbox" id="iaOn"><i></i></label>
+        <div id="wam-iawarn" class="wam-notice bad" hidden></div>
+        <div id="wam-iastatus" class="wam-hint">IA apagada.</div>
+
+        <div class="wam-hint"><b>Modo</b></div>
+        <div class="wam-seg" id="wam-iamode">
+          <button data-m="sugerencia" class="on">Sugerencia</button>
+          <button data-m="auto">Automático</button>
+        </div>
+        <p class="wam-hint">Sugerencia: la IA propone y tú apruebas. Automático: la IA responde sola, con esperas aleatorias, el horario y el límite diario.</p>
+
+        <div class="wam-hint"><b>A quién atiende</b></div>
+        <select id="iaScope">
+          <option value="etiquetas">Solo chats con las etiquetas que marque</option>
+          <option value="nuevos">Solo mensajes nuevos sin conversación previa</option>
+          <option value="todos">Todos los chats no leídos</option>
+        </select>
+        <p class="wam-hint">Siempre solo chats individuales con mensajes no leídos (no grupos).</p>
+
+        <div class="wam-hint"><b>Etiquetas que usará la IA</b> (elige al menos una)</div>
+        <div id="wam-ialabels" class="wam-list"></div>
+
+        <div class="wam-hint" style="margin-top:10px"><b>Instrucciones para la IA</b></div>
+        <textarea id="iaInstr" rows="6" maxlength="3000" placeholder="Qué vendes o qué servicio das, tono, precios, horarios, qué NO debe hacer… La IA solo usa esta información; si no está aquí, pasa el chat a una persona."></textarea>
+
+        <label>Máx. respuestas automáticas por día <span><input type="number" id="iaMax" min="1"></span></label>
+        <button id="wam-ianow" class="wam-btn alt">Revisar ahora</button>
+      </div>
+
+      <h4>Sugerencias para aprobar</h4>
+      <div class="wam-card"><div id="wam-iasug">No hay sugerencias pendientes.</div></div>
+
+      <h4>Necesitan a una persona</h4>
+      <div class="wam-card"><div id="wam-iahuman" class="wam-list small">Ninguno.</div></div>
+    </div>
+
     <div class="wam-foot">
       <button id="wam-start" class="wam-btn big">Iniciar envío</button>
       <button id="wam-pause" class="wam-btn alt">Pausar</button>
@@ -233,6 +274,7 @@
       panel.querySelectorAll('[data-body]').forEach((d) => (d.hidden = d.dataset.body !== b.dataset.tab));
       if (b.dataset.tab === 'met') renderMetrics();
       if (b.dataset.tab === 'avi') { renderNotifs(); fetchNotifs(true); }
+      if (b.dataset.tab === 'ia') { renderIaLabels(); renderIaSug(); renderIaHuman(); }
     };
   });
   chrome.runtime.onMessage.addListener((m) => {
@@ -609,6 +651,7 @@
       data = await call('getData');
       labelChats.clear();
       renderLabels();
+      renderIaLabels();
       loadLabelCounts();
     } catch (e) {
       log('Error leyendo datos: ' + e.message, 'err');
@@ -1096,6 +1139,259 @@
   };
   $('#wam-stop').onclick = () => { run.stop = true; run.paused = false; $('#wam-pause').textContent = 'Pausar'; };
 
+  // ---------- IA: responder chats individuales no leídos (sugerencia o automático) ----------
+  // Cada consulta llama a /api/ia-whatsapp (por el service worker) con la conversación; la IA devuelve la
+  // respuesta, la etiqueta que corresponde y si hace falta una persona. Solo chats individuales no leídos.
+  const IA_SCAN_MS = 2 * 60 * 1000;
+  const IA_MAX_PER_SCAN = 5; // consultas a la IA por revisión (control de costo)
+  let iaBusy = false;
+  let iaSeen = {}; // chatId -> hora del último mensaje del cliente ya atendido (no se vuelve a consultar)
+  let iaSug = []; // sugerencias pendientes de aprobar
+  let iaHuman = []; // chats que necesitan a una persona
+  let iaCount = { day: 0, n: 0 }; // respuestas automáticas enviadas hoy
+  let iaPausedDay = 0; // día en que el servidor avisó que se alcanzó el tope de consultas
+
+  const iaDay = () => dayKey(Date.now());
+  const iaToday = () => (iaCount.day === iaDay() ? iaCount.n : 0);
+  const iaPersist = () => {
+    const keys = Object.keys(iaSeen);
+    if (keys.length > 500) keys.slice(0, keys.length - 500).forEach((k) => delete iaSeen[k]);
+    chrome.storage.local.set({ wamIa: { seen: iaSeen, sug: iaSug.slice(0, 50), human: iaHuman.slice(0, 50), count: iaCount } });
+  };
+  const setIaStatus = (t) => { $('#wam-iastatus').textContent = t; };
+  const iaCanRun = () => !!(cfg.ia.on && lic.valid && cfg.ia.labels.length > 0);
+  const iaLabelName = (id) => { const l = data.labels.find((x) => String(x.id) === String(id)); return l ? l.name : String(id); };
+  const iaWarn = (t) => { const w = $('#wam-iawarn'); w.textContent = t || ''; w.hidden = !t; };
+
+  const iaAddHuman = (c, motivo, t) => {
+    iaHuman = iaHuman.filter((x) => x.chatId !== c.id);
+    iaHuman.unshift({ chatId: c.id, name: c.name, motivo, t });
+  };
+
+  // ----- pantalla -----
+  const renderIaLabels = () => {
+    const el = $('#wam-ialabels');
+    el.innerHTML = '';
+    if (!data.labels.length) { el.textContent = 'No hay etiquetas (requiere WhatsApp Business) o aún no se cargaron.'; return; }
+    data.labels.forEach((lb) => {
+      const l = document.createElement('label');
+      const i = document.createElement('input');
+      i.type = 'checkbox';
+      i.checked = cfg.ia.labels.includes(String(lb.id));
+      i.onchange = () => {
+        const id = String(lb.id);
+        cfg.ia.labels = i.checked ? [...new Set([...cfg.ia.labels, id])] : cfg.ia.labels.filter((x) => x !== id);
+        if (!cfg.ia.labels.length && cfg.ia.on) { cfg.ia.on = false; $('#iaOn').checked = false; iaWarn('La IA se apagó: tiene que haber al menos una etiqueta.'); }
+        save();
+      };
+      const s = document.createElement('span');
+      s.textContent = lb.name;
+      l.append(i, s);
+      el.appendChild(l);
+    });
+  };
+  const renderIaSug = () => {
+    const box = $('#wam-iasug');
+    box.innerHTML = '';
+    if (!iaSug.length) { box.textContent = 'No hay sugerencias pendientes.'; return; }
+    iaSug.forEach((s) => {
+      const card = document.createElement('div');
+      card.className = 'wam-iacard';
+      const h = document.createElement('b');
+      h.textContent = s.name;
+      const q = document.createElement('div');
+      q.className = 'wam-hint';
+      q.textContent = 'Cliente: ' + s.lastText;
+      const ta = document.createElement('textarea');
+      ta.rows = 3;
+      ta.value = s.respuesta;
+      card.append(h, q, ta);
+      if (s.etiquetaId) {
+        const tg = document.createElement('div');
+        tg.className = 'wam-hint';
+        tg.textContent = 'Etiqueta: ' + iaLabelName(s.etiquetaId);
+        card.appendChild(tg);
+      }
+      const row = document.createElement('div');
+      row.className = 'wam-row';
+      const ok = document.createElement('button');
+      ok.className = 'wam-btn';
+      ok.textContent = 'Enviar';
+      ok.onclick = async () => { ok.disabled = true; await iaApprove(s, ta.value); ok.disabled = false; };
+      const no = document.createElement('button');
+      no.className = 'wam-btn alt';
+      no.textContent = 'Descartar';
+      no.onclick = () => { iaSug = iaSug.filter((x) => x.chatId !== s.chatId); iaPersist(); renderIaSug(); };
+      row.append(ok, no);
+      card.appendChild(row);
+      box.appendChild(card);
+    });
+  };
+  const renderIaHuman = () => {
+    const box = $('#wam-iahuman');
+    box.innerHTML = '';
+    if (!iaHuman.length) { box.textContent = 'Ninguno.'; return; }
+    iaHuman.forEach((h) => {
+      const d = document.createElement('div');
+      d.className = 'wam-iahuman';
+      const x = document.createElement('a');
+      x.textContent = '×';
+      x.title = 'Quitar de la lista';
+      x.onclick = () => { iaHuman = iaHuman.filter((y) => y.chatId !== h.chatId); iaPersist(); renderIaHuman(); };
+      const t = document.createElement('span');
+      t.textContent = h.name + ' — ' + (h.motivo || 'requiere a una persona');
+      d.append(x, t);
+      box.appendChild(d);
+    });
+  };
+  const syncIa = () => {
+    $('#iaOn').checked = !!cfg.ia.on;
+    $('#iaScope').value = cfg.ia.scope;
+    $('#iaInstr').value = cfg.ia.instrucciones;
+    $('#iaMax').value = cfg.ia.maxDia;
+    panel.querySelectorAll('#wam-iamode button').forEach((b) => b.classList.toggle('on', b.dataset.m === cfg.ia.mode));
+    renderIaLabels(); renderIaSug(); renderIaHuman();
+  };
+
+  // ----- acciones -----
+  const iaApplyLabel = async (chatId, labelId, chatLabels) => {
+    if (!labelId) return;
+    const remove = cfg.ia.labels.filter((id) => id !== String(labelId) && (chatLabels || []).includes(id));
+    try { await call('iaSetLabel', { chatId, add: String(labelId), remove }); } catch (e) { log('No se pudo etiquetar: ' + e.message, 'err'); }
+  };
+  const iaDeliver = async (chat, text, labelId) => {
+    await call('send', { to: chat.id, text, typingMs: typingMs(text) });
+    await iaApplyLabel(chat.id, labelId, chat.labels);
+  };
+  const iaApprove = async (s, text) => {
+    const t = String(text || '').trim();
+    if (!t) return;
+    if (!lic.valid) return log('Licencia no válida', 'err');
+    try {
+      await iaDeliver({ id: s.chatId, labels: s.labels }, t, s.etiquetaId);
+      iaSug = iaSug.filter((x) => x.chatId !== s.chatId);
+      iaPersist(); renderIaSug();
+      log('✓ IA (aprobada): ' + s.name, 'ok');
+    } catch (e) {
+      log('✗ No se pudo enviar a ' + s.name + ': ' + e.message, 'err');
+    }
+  };
+  const iaAsk = (c) => new Promise((resolve) => {
+    const mensajes = c.msgs.filter((m) => m.texto && m.texto.trim()).map((m) => ({ de: m.de, texto: m.texto }));
+    chrome.runtime.sendMessage({
+      type: 'wam-ia',
+      payload: {
+        token: lic.token, numero: lic.number, contacto: c.name, mensajes,
+        etiquetas: cfg.ia.labels.map((id) => ({ id, nombre: iaLabelName(id) })),
+        instrucciones: cfg.ia.instrucciones,
+      },
+    }, (x) => resolve(x || { error: (chrome.runtime.lastError && chrome.runtime.lastError.message) || 'sin respuesta' }));
+  });
+  // espera con cuenta regresiva; devuelve false si la IA se apagó o empezó un envío masivo
+  const iaWait = async (sec, label) => {
+    const end = Date.now() + sec * 1000;
+    while (Date.now() < end) {
+      if (!iaCanRun() || run.state === 'running') return false;
+      setIaStatus(label + ' ' + fmt((end - Date.now()) / 1000));
+      await sleep(500);
+    }
+    return true;
+  };
+
+  // ----- revisión de chats -----
+  const iaScan = async (manual = false) => {
+    if (iaBusy) return;
+    if (!iaCanRun()) { if (manual) setIaStatus('Activa la IA y elige al menos una etiqueta.'); return; }
+    const auto = cfg.ia.mode === 'auto';
+    if (iaPausedDay === iaDay()) return setIaStatus('Se alcanzó el tope diario de consultas de IA. Continúa mañana.');
+    if (run.state === 'running') return setIaStatus('En pausa: hay un envío masivo en curso.');
+    if (auto && hoursActive() && !inWindow()) return setIaStatus('Fuera del horario (' + cfg.hourFrom + ':00–' + cfg.hourTo + ':00).');
+    if (auto && iaToday() >= cfg.ia.maxDia) return setIaStatus('Límite diario de respuestas automáticas alcanzado (' + iaToday() + ').');
+    iaBusy = true;
+    try {
+      const st = await call('status');
+      if (!st.ready) return setIaStatus('Esperando a que WhatsApp termine de cargar…');
+      setIaStatus('Revisando chats no leídos…');
+      const cands = await call('iaCandidates', { scope: cfg.ia.scope, labelIds: cfg.ia.labels, limit: 40 });
+      let asked = 0;
+      let nuevas = 0;
+      let aviso = ''; // problema de esta revisión: se muestra en lugar del resumen
+      for (const c of cands) {
+        if (!iaCanRun() || run.state === 'running') break;
+        const last = c.msgs[c.msgs.length - 1];
+        if (!last || last.de !== 'cliente') continue; // ya respondió el negocio
+        if ((iaSeen[c.id] || 0) >= last.t) continue; // ya atendido
+        if (asked >= IA_MAX_PER_SCAN) break; // el resto queda para la siguiente revisión
+        if (!last.texto || last.tipo !== 'chat') {
+          iaAddHuman(c, 'El último mensaje no es de texto (foto, audio, sticker…)', last.t);
+          iaSeen[c.id] = last.t;
+          continue;
+        }
+        if (auto && iaToday() >= cfg.ia.maxDia) break;
+        asked++;
+        const r = await iaAsk(c);
+        if (r.status === 429) { iaPausedDay = iaDay(); aviso = 'Se alcanzó el tope diario de consultas de IA. Continúa mañana.'; break; }
+        if (r.status !== 200 || !r.data) { aviso = 'La IA no respondió (' + (r.error || 'HTTP ' + r.status) + '). Se reintenta en la próxima revisión.'; break; }
+        if (r.data.valida === false) { aviso = 'Licencia: ' + (LIC_REASONS[r.data.motivo] || 'no válida'); break; }
+        iaSeen[c.id] = last.t;
+        const d = r.data;
+        if (d.requiere_humano || !d.respuesta) { iaAddHuman(c, d.motivo || 'La IA prefirió que responda una persona', last.t); continue; }
+        if (!auto) {
+          iaSug = iaSug.filter((x) => x.chatId !== c.id);
+          iaSug.unshift({ chatId: c.id, name: c.name, labels: c.labels, lastText: last.texto.slice(0, 200), respuesta: d.respuesta, etiquetaId: d.etiqueta_id || '', t: last.t });
+          nuevas++;
+          continue;
+        }
+        // automático: espera aleatoria antes de contestar, como una persona
+        if (!(await iaWait(rnd(15, 60), 'Respondiendo a ' + c.name + ' en'))) { delete iaSeen[c.id]; break; }
+        try {
+          await iaDeliver(c, d.respuesta, d.etiqueta_id);
+          iaCount = { day: iaDay(), n: iaToday() + 1 };
+          log('✓ IA respondió a ' + c.name, 'ok');
+        } catch (e) {
+          iaAddHuman(c, 'No se pudo enviar la respuesta: ' + e.message, last.t);
+          log('✗ IA no pudo responder a ' + c.name + ': ' + e.message, 'err');
+        }
+      }
+      iaPersist(); renderIaSug(); renderIaHuman();
+      setIaStatus(aviso || 'IA activa (' + (auto ? 'automático' : 'sugerencia') + ') · ' + (auto ? 'respuestas hoy: ' + iaToday() + ' · ' : '') + 'sugerencias: ' + iaSug.length + ' · requieren persona: ' + iaHuman.length + (nuevas ? ' · ' + nuevas + ' nuevas' : ''));
+    } catch (e) {
+      setIaStatus('Error: ' + e.message);
+    } finally {
+      iaBusy = false;
+    }
+  };
+
+  // ----- controles -----
+  $('#iaOn').onchange = (e) => {
+    const on = e.target.checked;
+    if (on) {
+      if (!cfg.ia.labels.length) { e.target.checked = false; iaWarn('Primero elige al menos una etiqueta que usará la IA.'); return; }
+      if (!cfg.ia.consent && !confirm('Las conversaciones con mensajes no leídos se enviarán a un servicio de IA para generar las respuestas. ¿Continuar?')) { e.target.checked = false; return; }
+      if (cfg.ia.mode === 'auto' && !confirm('En modo automático la IA responderá sola a tus clientes. ¿Activarla?')) { e.target.checked = false; return; }
+      cfg.ia.consent = true;
+    }
+    iaWarn('');
+    cfg.ia.on = on;
+    save();
+    setIaStatus(on ? 'IA activada. Revisando…' : 'IA apagada.');
+    if (on) iaScan(true);
+  };
+  panel.querySelectorAll('#wam-iamode button').forEach((b) => {
+    b.onclick = () => {
+      if (b.dataset.m === cfg.ia.mode) return;
+      if (b.dataset.m === 'auto' && cfg.ia.on && !confirm('En modo automático la IA responderá sola a tus clientes. ¿Cambiar?')) return;
+      cfg.ia.mode = b.dataset.m;
+      save();
+      syncIa();
+    };
+  });
+  $('#iaScope').onchange = (e) => { cfg.ia.scope = e.target.value; save(); };
+  $('#iaInstr').oninput = (e) => { cfg.ia.instrucciones = e.target.value.slice(0, 3000); save(); };
+  $('#iaMax').onchange = (e) => { cfg.ia.maxDia = Math.max(1, +e.target.value || 1); e.target.value = cfg.ia.maxDia; save(); };
+  $('#wam-ianow').onclick = () => iaScan(true);
+  setInterval(() => iaScan(false), IA_SCAN_MS);
+
   // ---------- init ----------
   chrome.storage.local.get('wamLic').then(({ wamLic }) => {
     if (wamLic) lic = { ...lic, ...wamLic, valid: false, checking: false, reason: wamLic.token ? 'Verificando licencia…' : '' };
@@ -1108,6 +1404,12 @@
     if (Array.isArray(wamRead)) readIds = new Set(wamRead);
     if (Array.isArray(wamNotifs)) notifs = wamNotifs; // se muestran al instante, aunque no haya conexión
     renderNotifs();
+  });
+  chrome.storage.local.get('wamIa').then(({ wamIa }) => {
+    if (!wamIa) return;
+    iaSeen = wamIa.seen || {}; iaSug = Array.isArray(wamIa.sug) ? wamIa.sug : []; iaHuman = Array.isArray(wamIa.human) ? wamIa.human : [];
+    iaCount = wamIa.count || iaCount;
+    renderIaSug(); renderIaHuman();
   });
   chrome.storage.local.get('wamLog').then(({ wamLog }) => { if (Array.isArray(wamLog)) sendLog = wamLog; });
   chrome.storage.local.get('wamCfg').then(({ wamCfg }) => {
@@ -1122,6 +1424,10 @@
       save();
     }
     if (cfg.source !== 'excel') cfg.source = 'label';
+    cfg.ia = { ...DEFAULTS.ia, ...(wamCfg && wamCfg.ia ? wamCfg.ia : {}) };
+    if (!Array.isArray(cfg.ia.labels)) cfg.ia.labels = [];
+    cfg.ia.labels = cfg.ia.labels.map(String);
+    syncIa();
     syncFields();
     applySource();
     renderPreview();

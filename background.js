@@ -53,3 +53,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, send) => {
     chrome.action.setBadgeText({ text: msg.count > 0 ? String(Math.min(msg.count, 99)) : '' });
   }
 });
+
+// IA: POST /api/ia-whatsapp { token, numero, contacto, mensajes, etiquetas, instrucciones }
+const IA_URL = 'https://agendaconmigo-api.vercel.app/api/ia-whatsapp';
+chrome.runtime.onMessage.addListener((msg, _sender, send) => {
+  if (!msg || msg.type !== 'wam-ia') return;
+  fetch(IA_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(msg.payload || {}),
+  })
+    .then(async (r) => send({ status: r.status, data: await r.json().catch(() => ({})) }))
+    .catch((e) => send({ error: e.message }));
+  return true; // respuesta asíncrona
+});
