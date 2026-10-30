@@ -76,6 +76,7 @@
       const ahora = Math.floor(Date.now() / 1000);
       if (maxAgeSec) chats = chats.filter((c) => !c.t || ahora - Number(c.t) <= maxAgeSec);
       chats.sort((a, b) => Number(b.t || 0) - Number(a.t || 0)); // los más recientes primero
+      chats = chats.slice(0, 300); // tope de chats examinados por revisión (con "sin límite" no se recorren miles)
       const forzados = new Set((incluir || []).map(String));
       let miNumero = '';
       try { miNumero = String(WPP.conn.getMyUserId().user || ''); } catch {}
@@ -94,6 +95,8 @@
           texto: m.type === 'chat' ? String(m.body || '') : String(m.caption || ''),
           t: Number(m.t || 0),
         })).sort((a, b) => a.t - b.t);
+        const ultimo = lista[lista.length - 1];
+        if (!ultimo || ultimo.de !== 'cliente') continue; // al día: el último mensaje es del negocio (no ocupa cupo)
         const nuevo = lista.length <= 20 && !lista.some((m) => m.de === 'yo'); // historial completo y sin nada enviado por el negocio
         if (scope === 'nuevos' && !nuevo && !forzados.has(id)) continue;
         out.push({

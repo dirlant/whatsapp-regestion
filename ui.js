@@ -62,7 +62,7 @@
     hourTo: 20,
     source: 'label',
     cc: '',
-    ia: { on: false, mode: 'sugerencia', scope: 'etiquetas', labels: [], instrucciones: '', maxDia: 100, horas: 72, consent: false },
+    ia: { on: false, mode: 'sugerencia', scope: 'etiquetas', labels: [], instrucciones: '', maxDia: 100, horas: 0, instrAplicadas: '', consent: false },
     messages: [...EXAMPLE_MSGS],
   };
   let cfg = { ...DEFAULTS };
@@ -247,10 +247,12 @@
         <div class="wam-hint"><b>Etiquetas que usará la IA</b> (elige al menos una)</div>
         <div id="wam-ialabels" class="wam-list"></div>
 
-        <div class="wam-hint" style="margin-top:10px"><b>Instrucciones para la IA</b></div>
+        <div class="wam-hint" style="margin-top:10px"><b>Entrenamiento de la IA</b></div>
         <textarea id="iaInstr" rows="6" maxlength="3000" placeholder="Qué vendes o qué servicio das, tono, precios, horarios, qué NO debe hacer… La IA solo usa esta información; si no está aquí, pasa el chat a una persona."></textarea>
+        <div id="wam-iatrain" class="wam-notice" hidden>Tienes cambios sin aplicar. La IA sigue respondiendo con el entrenamiento anterior hasta que pulses «Actualizar IA».</div>
+        <button id="wam-iaupdate" class="wam-btn" disabled>Actualizar IA</button>
 
-        <label>Atender conversaciones pendientes de las últimas (horas; 0 = sin límite) <span><input type="number" id="iaHoras" min="0" max="720"></span></label>
+        <label>Limitar a conversaciones de las últimas (horas; 0 = sin límite) <span><input type="number" id="iaHoras" min="0" max="720"></span></label>
         <label>Máx. respuestas automáticas por día <span><input type="number" id="iaMax" min="1"></span></label>
         <button id="wam-ianow" class="wam-btn alt">Revisar ahora</button>
       </div>
@@ -1188,6 +1190,14 @@
     iaHuman.unshift({ chatId: c.id, name: c.name, motivo, t });
   };
 
+  // ----- entrenamiento: lo escrito es un borrador hasta pulsar «Actualizar IA» -----
+  const iaTrainDirty = () => (cfg.ia.instrucciones || '') !== (cfg.ia.instrAplicadas || '');
+  const renderIaTrain = () => {
+    const d = iaTrainDirty();
+    $('#wam-iatrain').hidden = !d;
+    $('#wam-iaupdate').disabled = !d;
+  };
+
   // ----- pantalla -----
   const renderIaLabels = () => {
     const el = $('#wam-ialabels');
@@ -1269,6 +1279,7 @@
     $('#iaOn').checked = !!cfg.ia.on;
     $('#iaScope').value = cfg.ia.scope;
     $('#iaInstr').value = cfg.ia.instrucciones;
+    renderIaTrain();
     $('#iaMax').value = cfg.ia.maxDia;
     $('#iaHoras').value = cfg.ia.horas;
     panel.querySelectorAll('#wam-iamode button').forEach((b) => b.classList.toggle('on', b.dataset.m === cfg.ia.mode));
@@ -1302,14 +1313,14 @@
     }
   };
   const iaAsk = (c) => new Promise((resolve) => {
-    const mensajes = c.msgs.filter((m) => m.texto && m.texto.trim()).map((m) => ({ de: m.de, texto: m.texto }));
+    const mensajes = c.msgs.filter((m) => m.texto && m.texto.trim()).map((m) => ({ de: m.de, texto: m.texto, t: m.t }));
     chrome.runtime.sendMessage({
       type: 'wam-ia',
       payload: {
         token: lic.token, numero: lic.number, contacto: c.name, mensajes,
         es_nuevo: !!c.nuevo,
         etiquetas: cfg.ia.labels.map((id) => ({ id, nombre: iaLabelName(id) })),
-        instrucciones: cfg.ia.instrucciones,
+        instrucciones: cfg.ia.instrAplicadas, // solo el entrenamiento ya aplicado con «Actualizar IA»
       },
     }, (x) => resolve(x || { error: (chrome.runtime.lastError && chrome.runtime.lastError.message) || 'sin respuesta' }));
   });
@@ -1437,13 +1448,24 @@
   $('#iaScope').onchange = (e) => { cfg.ia.scope = e.target.value; save(); if (cfg.ia.on) iaScan(true); };
   $('#iaHoras').onchange = (e) => {
     const v = Number(e.target.value);
-    cfg.ia.horas = e.target.value !== '' && Number.isFinite(v) ? Math.min(720, Math.max(0, Math.round(v))) : 72;
+    cfg.ia.horas = e.target.value !== '' && Number.isFinite(v) ? Math.min(720, Math.max(0, Math.round(v))) : 0;
     cfg.ia.horasEditada = true;
     e.target.value = cfg.ia.horas;
     save();
     if (cfg.ia.on) iaScan(true);
   };
-  $('#iaInstr').oninput = (e) => { cfg.ia.instrucciones = e.target.value.slice(0, 3000); save(); };
+  $('#iaInstr').oninput = (e) => { cfg.ia.instrucciones = e.target.value.slice(0, 3000); save(); renderIaTrain(); };
+  $('#wam-iaupdate').onclick = () => {
+    if (!iaTrainDirty()) return;
+    const pend = iaSug.length + iaHuman.length;
+    if (pend && !confirm('La IA volverá a revisar los chats pendientes con el nuevo entrenamiento: se descartan las ' + iaSug.length + ' sugerencia(s) actuales y se reevalúan los ' + iaHuman.length + ' chat(s) que necesitaban a una persona. ¿Actualizar?')) return;
+    cfg.ia.instrAplicadas = cfg.ia.instrucciones;
+    [...iaSug, ...iaHuman].forEach((x) => { delete iaSeen[x.chatId]; }); // se vuelven a consultar con lo nuevo
+    iaSug = []; iaHuman = [];
+    save(); iaPersist(); renderIaSug(); renderIaHuman(); renderIaTrain(); iaWarn('');
+    setIaStatus('IA actualizada con el nuevo entrenamiento.' + (cfg.ia.on ? ' Revisando chats…' : ''));
+    if (cfg.ia.on) iaScan(true);
+  };
   $('#iaMax').onchange = (e) => { cfg.ia.maxDia = Math.max(1, +e.target.value || 1); e.target.value = cfg.ia.maxDia; save(); };
   $('#wam-ianow').onclick = () => iaScan(true);
   setInterval(() => iaScan(false), IA_SCAN_MS);
@@ -1484,8 +1506,9 @@
     cfg.ia = { ...DEFAULTS.ia, ...(wamCfg && wamCfg.ia ? wamCfg.ia : {}) };
     if (!Array.isArray(cfg.ia.labels)) cfg.ia.labels = [];
     if (cfg.ia.scope !== 'nuevos') cfg.ia.scope = 'etiquetas'; // ya no existe "todos": hay que elegir etiquetas o mensajes nuevos
-    { const h = Number(cfg.ia.horas); cfg.ia.horas = Number.isFinite(h) ? Math.min(720, Math.max(0, h)) : 72; }
-    if (cfg.ia.horas === 12 && !cfg.ia.horasEditada) cfg.ia.horas = 72; // el 12 era el valor inicial anterior, no una elección del usuario
+    { const h = Number(cfg.ia.horas); cfg.ia.horas = Number.isFinite(h) ? Math.min(720, Math.max(0, h)) : 0; }
+    if (!cfg.ia.horasEditada) cfg.ia.horas = 0; // por defecto sin límite: revisa todas las conversaciones pendientes y responde según el contexto
+    if (typeof cfg.ia.instrAplicadas !== 'string') cfg.ia.instrAplicadas = cfg.ia.instrucciones || ''; // entrenamiento ya aplicado (versiones anteriores)
     cfg.ia.labels = cfg.ia.labels.map(String);
     syncIa();
     syncFields();
