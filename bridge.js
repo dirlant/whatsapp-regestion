@@ -117,6 +117,45 @@
       return out;
     },
 
+    // ----- IA: conversaciones con etiqueta que quedaron detenidas (el último mensaje es del negocio) para reactivarlas -----
+    // Devuelve los últimos 3 mensajes de cada una como contexto. Se leen SIN marcarlos como leídos.
+    async iaReactivar({ labelIds, dias, limit }) {
+      if (!labelIds || !labelIds.length) return [];
+      let chats = await WPP.chat.list({ onlyUsers: true, withLabels: labelIds.map(String) });
+      const ahora = Math.floor(Date.now() / 1000);
+      const minSeg = Math.max(0, Number(dias) || 0) * 86400;
+      chats = chats.filter((c) => !c.t || ahora - Number(c.t) >= minSeg); // sin actividad desde hace al menos N días
+      chats.sort((a, b) => Number(b.t || 0) - Number(a.t || 0)); // primero los más recientes (más probables de retomar)
+      chats = chats.slice(0, 600);
+      let miNumero = '';
+      try { miNumero = String(WPP.conn.getMyUserId().user || ''); } catch {}
+      const out = [];
+      for (const c of chats) {
+        if (out.length >= (limit || 500)) break;
+        const id = toId(c.id);
+        if (!id.endsWith('@c.us') && !id.endsWith('@lid')) continue; // solo personas
+        if (miNumero && id.startsWith(miNumero + '@')) continue;
+        if (c.contact && c.contact.isBlocked) continue;
+        let msgs = [];
+        try { msgs = await WPP.chat.getMessages(id, { count: 6 }); } catch { continue; }
+        const lista = (msgs || []).map((m) => ({
+          de: m.id && m.id.fromMe ? 'yo' : 'cliente',
+          tipo: m.type || '',
+          texto: m.type === 'chat' ? String(m.body || '') : String(m.caption || ''),
+          t: Number(m.t || 0),
+        })).sort((a, b) => a.t - b.t);
+        const ultimo = lista[lista.length - 1];
+        if (!ultimo || ultimo.de !== 'yo') continue; // si el último mensaje es del cliente, lo atiende la IA de respuestas
+        out.push({
+          id,
+          name: c.name || c.formattedTitle || (c.contact && (c.contact.name || c.contact.pushname)) || id.split('@')[0],
+          labels: (c.labels || []).map(String),
+          msgs: lista.slice(-3),
+        });
+      }
+      return out;
+    },
+
     // Pone la etiqueta "add" y quita las de "remove" en un chat (solo WhatsApp Business)
     async iaSetLabel({ chatId, add, remove }) {
       const ops = [];

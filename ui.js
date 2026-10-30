@@ -62,7 +62,7 @@
     hourTo: 20,
     source: 'label',
     cc: '',
-    ia: { on: false, mode: 'sugerencia', scope: 'etiquetas', labels: [], instrucciones: '', maxDia: 100, horas: 0, instrAplicadas: '', horarioOn: true, inicio: '08:00', cierre: '20:00', palabras: '', consent: false },
+    ia: { on: false, mode: 'sugerencia', scope: 'etiquetas', labels: [], instrucciones: '', maxDia: 100, horas: 0, instrAplicadas: '', horarioOn: true, inicio: '08:00', cierre: '20:00', palabras: '', reLabels: [], reDias: 3, reObjetivo: '', consent: false },
     messages: [...EXAMPLE_MSGS],
   };
   let cfg = { ...DEFAULTS };
@@ -265,6 +265,24 @@
         <button id="wam-ianow" class="wam-btn alt">Revisar ahora</button>
       </div>
 
+      <h4>Reactivar conversaciones (envío masivo con IA)</h4>
+      <div class="wam-card">
+        <p class="wam-hint">La IA lee los últimos 3 mensajes de cada conversación con las etiquetas que marques y escribe un mensaje nuevo para retomarla. Se envía con los intervalos, pausas, horario y límites del envío masivo.</p>
+        <div class="wam-hint"><b>Etiquetas a reactivar</b></div>
+        <div id="wam-relabels" class="wam-list"></div>
+        <label>Sin respuesta desde hace al menos (días) <span><input type="number" id="iaReDias" min="0" max="3650"></span></label>
+        <div class="wam-hint"><b>Objetivo del mensaje</b> (opcional)</div>
+        <textarea id="iaReObj" rows="2" maxlength="300" placeholder="Ej.: retomar la conversación y ofrecer agendar una cita esta semana"></textarea>
+        <button id="wam-rebuscar" class="wam-btn alt">Buscar conversaciones</button>
+        <div id="wam-restatus" class="wam-hint">Aún no se buscó.</div>
+        <div class="wam-row">
+          <button id="wam-reiniciar" class="wam-btn">Iniciar reactivación</button>
+          <button id="wam-repausa" class="wam-btn alt">Pausar</button>
+          <button id="wam-redetener" class="wam-btn alt danger">Detener</button>
+        </div>
+        <div id="wam-iaprog" class="wam-hint"></div>
+      </div>
+
       <h4>Sugerencias para aprobar</h4>
       <div class="wam-card"><div id="wam-iasug">No hay sugerencias pendientes.</div></div>
 
@@ -298,7 +316,7 @@
       panel.querySelectorAll('[data-body]').forEach((d) => (d.hidden = d.dataset.body !== b.dataset.tab));
       if (b.dataset.tab === 'met') renderMetrics();
       if (b.dataset.tab === 'avi') { renderNotifs(); fetchNotifs(true); }
-      if (b.dataset.tab === 'ia') { renderIaLabels(); renderIaSug(); renderIaHuman(); }
+      if (b.dataset.tab === 'ia') { renderIaLabels(); renderIaReLabels(); renderIaSug(); renderIaHuman(); }
       $('#wam-foot-bulk').hidden = !(b.dataset.tab === 'env' || b.dataset.tab === 'msg'); // botones del envío masivo
       $('#wam-foot-ia').hidden = b.dataset.tab !== 'ia'; // botones de la IA
     };
@@ -678,6 +696,7 @@
       labelChats.clear();
       renderLabels();
       renderIaLabels();
+      renderIaReLabels();
       loadLabelCounts();
     } catch (e) {
       log('Error leyendo datos: ' + e.message, 'err');
@@ -975,6 +994,7 @@
     const total = run.total ?? recipients.length;
     $('#wam-stats').textContent = `${statsPrefix}Enviados ${run.sent} · Fallidos ${run.failed} · Total ${total}${extra ? ' — ' + extra : ''}`;
     $('#wam-barfill').style.width = total ? ((run.sent + run.failed) / total) * 100 + '%' : '0%';
+    $('#wam-iaprog').textContent = $('#wam-stats').textContent;
   };
 
   // espera interrumpible; devuelve false si se detuvo
@@ -1046,7 +1066,7 @@
     const show = !!(job && job.queue.length) && run.state !== 'running';
     $('#wam-resume').hidden = !show;
     if (!show) return;
-    $('#wam-resume-info').textContent =
+    $('#wam-resume-info').textContent = (job.tipo === 'ia' ? 'Reactivación con IA. ' : '') +
       `Quedan ${job.queue.length} de ${job.total} contactos · enviados ${job.sent}, fallidos ${job.failed} · iniciado ` +
       new Date(job.startedAt).toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
   };
@@ -1056,27 +1076,36 @@
   };
   $('#wam-resume-go').onclick = () => start(true);
 
-  const start = async (resume = false) => {
+  // opts = { queue, gen, onSent } -> reactivación con IA: cada mensaje lo genera gen(r) en vez de salir de una plantilla
+  const start = async (resume = false, opts = null) => {
     if (run.state === 'running') return;
     if (!(await checkLicense())) { gateOpen = true; renderLic(); return log(lic.reason || 'Licencia no válida', 'err'); }
+    const iaMode = !!(opts && opts.gen) || (resume === true && job && job.tipo === 'ia');
+    if (iaMode && !opts) opts = iaReOpts(); // al reanudar una reactivación hay que volver a armar el generador
     if (resume !== true) {
-      if (!recipients.length) return log('No hay destinatarios', 'err');
-      if (cfg.source === 'excel' && !excel.rows.length) return log('Carga primero un archivo Excel', 'err');
+      if (iaMode) { if (!opts.queue || !opts.queue.length) return log('No hay conversaciones para reactivar', 'err'); }
+      else {
+        if (!recipients.length) return log('No hay destinatarios', 'err');
+        if (cfg.source === 'excel' && !excel.rows.length) return log('Carga primero un archivo Excel', 'err');
+      }
     } else if (!job || !job.queue.length) return log('No hay un envío pendiente', 'err');
-    if (!activeMsgs().length) return log('Escribe al menos un mensaje', 'err');
-    const allowedVars = new Set(resume === true ? (job.queue[0].vars ? Object.keys(job.queue[0].vars) : ['nombre']) : varKeys());
-    const unknown = new Set();
-    activeMsgs().forEach((m) => [...m.matchAll(/{([^{}|]+)}/g)].forEach((x) => { if (!allowedVars.has(norm(x[1]))) unknown.add(x[0]); }));
-    if (unknown.size) {
-      return log('Variables sin datos: ' + [...unknown].join(' ') + (cfg.source === 'excel' ? ' (no existen como columna en el Excel)' : ' (solo existen al enviar por Excel)'), 'err');
+    if (!iaMode) {
+      if (!activeMsgs().length) return log('Escribe al menos un mensaje', 'err');
+      const allowedVars = new Set(resume === true ? (job.queue[0].vars ? Object.keys(job.queue[0].vars) : ['nombre']) : varKeys());
+      const unknown = new Set();
+      activeMsgs().forEach((m) => [...m.matchAll(/{([^{}|]+)}/g)].forEach((x) => { if (!allowedVars.has(norm(x[1]))) unknown.add(x[0]); }));
+      if (unknown.size) {
+        return log('Variables sin datos: ' + [...unknown].join(' ') + (cfg.source === 'excel' ? ' (no existen como columna en el Excel)' : ' (solo existen al enviar por Excel)'), 'err');
+      }
     }
     try { if (!(await call('status')).ready) throw 0; } catch { return log('WhatsApp aún no está listo', 'err'); }
     const allowed = dailyAllowance();
     const remaining = allowed - sentToday();
     if (remaining <= 0) return log(`Límite diario alcanzado: ${sentToday()} de ${allowed} enviados hoy. Continúa mañana.`, 'err');
     const warm = cfg.auto && cfg.warmup && allowed < cfg.dailyLimit ? ` (calentamiento: hoy máximo ${allowed})` : '';
-    const pending = resume === true ? job.queue.length : recipients.length;
-    if (!confirm(`${resume === true ? 'Se reanudará el envío' : 'Se enviarán'}: hasta ${Math.min(pending, remaining)} mensajes hoy${warm}. ¿Continuar?`)) return;
+    const pending = resume === true ? job.queue.length : (iaMode ? opts.queue.length : recipients.length);
+    const que = iaMode ? 'mensajes de reactivación escritos por la IA' : 'mensajes';
+    if (!confirm(`${resume === true ? 'Se reanudará el envío' : 'Se enviarán'}: hasta ${Math.min(pending, remaining)} ${que} hoy${warm}, con las pausas de seguridad. ¿Continuar?`)) return;
     if (resume !== true && job && job.queue.length && !confirm('Hay un envío pendiente sin terminar. Iniciar uno nuevo lo descartará. ¿Continuar?')) return;
 
     let queue;
@@ -1084,8 +1113,9 @@
       queue = [...job.queue];
       run = { state: 'running', sent: job.sent, failed: job.failed, stop: false, paused: false, total: job.total };
     } else {
-      queue = cfg.auto ? shuffle([...recipients]) : [...recipients];
-      job = { queue, total: queue.length, sent: 0, failed: 0, source: cfg.source, startedAt: Date.now() };
+      const base = iaMode ? opts.queue : recipients;
+      queue = cfg.auto ? shuffle([...base]) : [...base];
+      job = { queue, total: queue.length, sent: 0, failed: 0, source: iaMode ? 'ia' : cfg.source, tipo: iaMode ? 'ia' : undefined, startedAt: Date.now() };
       run = { state: 'running', sent: 0, failed: 0, stop: false, paused: false, total: queue.length };
     }
     statsPrefix = '';
@@ -1093,7 +1123,7 @@
     persistJob(); renderResume();
     let nextPauseAt = rndInt(cfg.batchMin, cfg.batchMax);
     let sinceBreak = 0, consecErr = 0, lastLic = Date.now();
-    log('Envío iniciado');
+    log(iaMode ? 'Reactivación con IA iniciada' : 'Envío iniciado');
 
     for (let i = 0; i < queue.length; i++) {
       if (run.stop) break;
@@ -1120,9 +1150,30 @@
       while (run.paused && !run.stop) await sleep(500);
       if (run.stop) break;
 
-      const text = build(r);
-      const msgIdx = lastMsg;
       const who = r.name || r.id.split('@')[0];
+      let text, msgIdx, etiquetaIA = '';
+      if (iaMode) {
+        setStats('La IA está escribiendo para ' + who + '…');
+        const g = await opts.gen(r);
+        if (g.skip) { // la IA no recomienda escribirle (pidió no recibir mensajes, no hay contexto…): no se envía ni se espera
+          log('— ' + who + ': no se le escribe (' + g.skip + ')');
+          job.queue = queue.slice(i + 1); processed++; persistJob(); setStats();
+          continue;
+        }
+        if (g.error) {
+          run.failed++; consecErr++; processed++;
+          job.queue = queue.slice(i + 1); job.sent = run.sent; job.failed = run.failed; persistJob();
+          record({ ok: false, id: r.id, name: r.name, err: g.error });
+          log('✗ ' + who + ': ' + g.error, 'err');
+          if (consecErr >= cfg.maxErrors) { log('Detenido: ' + consecErr + ' errores seguidos', 'err'); break; }
+          setStats();
+          continue;
+        }
+        text = g.text; etiquetaIA = g.etiqueta || ''; msgIdx = null;
+      } else {
+        text = build(r);
+        msgIdx = lastMsg;
+      }
       // se guarda ANTES de enviar: si la pestaña se cierra a mitad, no se repite este contacto (evita duplicados)
       job.queue = queue.slice(i + 1);
       persistJob();
@@ -1137,6 +1188,7 @@
         await call('send', { to, text, typingMs: typingMs(text) });
         run.sent++; sinceBreak++; consecErr = 0;
         record({ ok: true, id: r.id, name: r.name, m: msgIdx });
+        if (iaMode) { if (opts.onSent) opts.onSent(r); if (etiquetaIA) iaApplyLabel(to, etiquetaIA, r.labels); }
         log(`✓ ${who}`, 'ok');
       } catch (e) {
         run.failed++; consecErr++;
@@ -1157,15 +1209,18 @@
     persistJob(); renderResume();
     statsPrefix = finished ? 'Terminado. ' : 'Detenido. ';
     setStats();
-    log(finished ? 'Envío terminado' : `Envío detenido. Quedan ${queue.length - processed} contactos pendientes: puedes reanudar`);
+    log(finished ? (iaMode ? 'Reactivación terminada' : 'Envío terminado') : `Envío detenido. Quedan ${queue.length - processed} contactos pendientes: puedes reanudar`);
   };
 
   $('#wam-start').onclick = () => start(false);
-  $('#wam-pause').onclick = () => {
+  const bulkPause = () => {
     run.paused = !run.paused;
     $('#wam-pause').textContent = run.paused ? 'Reanudar' : 'Pausar';
+    $('#wam-repausa').textContent = run.paused ? 'Reanudar' : 'Pausar';
   };
-  $('#wam-stop').onclick = () => { run.stop = true; run.paused = false; $('#wam-pause').textContent = 'Pausar'; };
+  const bulkStop = () => { run.stop = true; run.paused = false; $('#wam-pause').textContent = 'Pausar'; $('#wam-repausa').textContent = 'Pausar'; };
+  $('#wam-pause').onclick = bulkPause;
+  $('#wam-stop').onclick = bulkStop;
 
   // ---------- IA: responder chats individuales no leídos (sugerencia o automático) ----------
   // Cada consulta llama a /api/ia-whatsapp (por el service worker) con la conversación; la IA devuelve la
@@ -1177,6 +1232,7 @@
   let iaSug = []; // sugerencias pendientes de aprobar
   let iaHuman = []; // chats que necesitan a una persona
   let iaCount = { day: 0, n: 0 }; // respuestas automáticas enviadas hoy
+  let iaReSent = {}; // chatId -> cuándo (ms) se le envió una reactivación (para no insistir)
   let iaPausedDay = 0; // día en que el servidor avisó que se alcanzó el tope de consultas
   let iaEngaged = {}; // chatId -> true: conversaciones que la IA viene atendiendo (se continúan aunque ya no sean "nuevas")
   let iaSentT = {}; // chatId -> hora (segundos) del último mensaje enviado por la IA
@@ -1192,7 +1248,7 @@
     if (keys.length > 500) keys.slice(0, keys.length - 500).forEach((k) => delete iaSeen[k]);
     [iaEngaged, iaSentT].forEach((o) => { const k = Object.keys(o); if (k.length > 500) k.slice(0, k.length - 500).forEach((x) => delete o[x]); });
     Object.keys(iaPause).forEach((k) => { if (iaPause[k] < Date.now()) delete iaPause[k]; });
-    chrome.storage.local.set({ wamIa: { seen: iaSeen, sug: iaSug.slice(0, 50), human: iaHuman.slice(0, 50), count: iaCount, engaged: iaEngaged, sentT: iaSentT, pause: iaPause } });
+    chrome.storage.local.set({ wamIa: { seen: iaSeen, sug: iaSug.slice(0, 50), human: iaHuman.slice(0, 50), count: iaCount, engaged: iaEngaged, sentT: iaSentT, pause: iaPause, reSent: iaReSent } });
   };
   const setIaStatus = (t) => { $('#wam-iastatus').textContent = t; };
   const iaCanRun = () => !!(cfg.ia.on && lic.valid && cfg.ia.labels.length > 0);
@@ -1327,6 +1383,9 @@
   };
   const syncIa = () => {
     renderIaRun();
+    $('#iaReDias').value = cfg.ia.reDias;
+    $('#iaReObj').value = cfg.ia.reObjetivo;
+    renderIaReLabels();
     $('#iaScope').value = cfg.ia.scope;
     $('#iaKw').value = cfg.ia.palabras;
     renderIaKw();
@@ -1479,6 +1538,84 @@
     if (ev.source === window && m && m.tag === TAG && m.dir === 'evt' && m.event === 'new_message') iaKick(m.chatId);
   });
 
+  // ---------- IA: reactivar conversaciones por etiqueta (envío masivo con mensajes escritos por la IA) ----------
+  // Usa el motor del envío masivo (intervalos, pausas, horario, límite diario, calentamiento): solo cambia que el texto
+  // de cada contacto lo genera la IA leyendo los últimos 3 mensajes de esa conversación.
+  let iaRe = []; // conversaciones encontradas
+  const iaReStatus = (t) => { $('#wam-restatus').textContent = t; };
+  const renderIaReLabels = () => {
+    const el = $('#wam-relabels');
+    el.innerHTML = '';
+    if (!data.labels.length) { el.textContent = 'No hay etiquetas (requiere WhatsApp Business) o aún no se cargaron.'; return; }
+    data.labels.forEach((lb) => {
+      const l = document.createElement('label');
+      const i = document.createElement('input');
+      i.type = 'checkbox';
+      i.checked = cfg.ia.reLabels.includes(String(lb.id));
+      i.onchange = () => {
+        const id = String(lb.id);
+        cfg.ia.reLabels = i.checked ? [...new Set([...cfg.ia.reLabels, id])] : cfg.ia.reLabels.filter((x) => x !== id);
+        iaRe = [];
+        iaReStatus('Cambiaste las etiquetas: vuelve a buscar las conversaciones.');
+        save();
+      };
+      const sp = document.createElement('span');
+      sp.textContent = lb.name;
+      l.append(i, sp);
+      el.appendChild(l);
+    });
+  };
+  const iaReBuscar = async () => {
+    if (!cfg.ia.reLabels.length) { iaRe = []; iaReStatus('Elige al menos una etiqueta.'); return false; }
+    iaReStatus('Buscando conversaciones…');
+    try {
+      const st = await call('status');
+      if (!st.ready) { iaReStatus('Esperando a que WhatsApp termine de cargar…'); return false; }
+      const lista = await call('iaReactivar', { labelIds: cfg.ia.reLabels, dias: cfg.ia.reDias, limit: 500 });
+      // no se insiste con quien ya recibió una reactivación hace poco
+      const espera = Math.max(cfg.ia.reDias, 7) * 86400000;
+      iaRe = lista.filter((c) => !(iaReSent[c.id] && Date.now() - iaReSent[c.id] < espera));
+      const omit = lista.length - iaRe.length;
+      iaReStatus(iaRe.length + ' conversación(es) para reactivar: sin respuesta desde hace ' + cfg.ia.reDias + '+ día(s)' + (omit ? ' (' + omit + ' omitida(s): ya se les escribió hace poco)' : '') + '.');
+      return true;
+    } catch (e) {
+      iaReStatus('Error: ' + e.message);
+      return false;
+    }
+  };
+  // Genera el mensaje de un contacto con la IA. Devuelve { text, etiqueta } | { skip } | { error }
+  const iaReactivarGen = async (r) => {
+    const mensajes = (r.ctx || []).filter((m) => m.texto && m.texto.trim()).slice(-3).map((m) => ({ de: m.de, texto: m.texto, t: m.t }));
+    if (!mensajes.length) return { skip: 'no hay mensajes de texto para darle contexto a la IA' };
+    const resp = await new Promise((resolve) => chrome.runtime.sendMessage({
+      type: 'wam-ia',
+      payload: {
+        token: lic.token, numero: lic.number, modo: 'reactivar', objetivo: cfg.ia.reObjetivo, contacto: r.name, mensajes,
+        etiquetas: cfg.ia.labels.map((id) => ({ id, nombre: iaLabelName(id) })),
+        instrucciones: cfg.ia.instrAplicadas,
+      },
+    }, (x) => resolve(x || { error: (chrome.runtime.lastError && chrome.runtime.lastError.message) || 'sin respuesta' })));
+    if (resp.status === 429) return { error: 'Se alcanzó el tope diario de consultas de IA' };
+    if (resp.status !== 200 || !resp.data) return { error: 'La IA no respondió (' + (resp.error || 'HTTP ' + resp.status) + ')' };
+    if (resp.data.valida === false) return { error: 'Licencia: ' + (LIC_REASONS[resp.data.motivo] || 'no válida') };
+    if (resp.data.sin_respuesta || !resp.data.respuesta) return { skip: resp.data.motivo || 'la IA no recomienda escribirle' };
+    return { text: resp.data.respuesta, etiqueta: resp.data.etiqueta_id || '' };
+  };
+  // opciones para el motor del envío masivo (también al reanudar una reactivación pendiente)
+  const iaReOpts = (queue) => ({
+    queue,
+    gen: iaReactivarGen,
+    onSent: (r) => { iaReSent[r.id] = Date.now(); iaPersist(); },
+  });
+  const iaReIniciar = async () => {
+    if (run.state === 'running') return iaReStatus('Ya hay un envío en curso. Espera a que termine o deténlo.');
+    if (!cfg.ia.consent && !confirm('El texto de las conversaciones se enviará a un servicio de IA para escribir los mensajes. ¿Continuar?')) return;
+    cfg.ia.consent = true; save();
+    if (!(await iaReBuscar()) || !iaRe.length) { if (!iaRe.length) iaReStatus('No hay conversaciones para reactivar con esos criterios.'); return; }
+    const queue = iaRe.map((c) => ({ id: c.id, name: c.name, labels: c.labels, ctx: c.msgs }));
+    start(false, iaReOpts(queue));
+  };
+
   // ----- controles -----
   const iaStart = () => {
     if (cfg.ia.on) return;
@@ -1521,6 +1658,12 @@
   $('#iaHorarioOn').onchange = (e) => { cfg.ia.horarioOn = e.target.checked; iaHorarioCambio(); };
   $('#iaInicio').onchange = (e) => { if (iaMin(e.target.value) !== null) cfg.ia.inicio = e.target.value; else e.target.value = cfg.ia.inicio; iaHorarioCambio(); };
   $('#iaCierre').onchange = (e) => { if (iaMin(e.target.value) !== null) cfg.ia.cierre = e.target.value; else e.target.value = cfg.ia.cierre; iaHorarioCambio(); };
+  $('#iaReDias').onchange = (e) => { const v = Number(e.target.value); cfg.ia.reDias = e.target.value !== '' && Number.isFinite(v) ? Math.min(3650, Math.max(0, Math.round(v))) : 3; e.target.value = cfg.ia.reDias; iaRe = []; save(); };
+  $('#iaReObj').oninput = (e) => { cfg.ia.reObjetivo = e.target.value.slice(0, 300); save(); };
+  $('#wam-rebuscar').onclick = () => iaReBuscar();
+  $('#wam-reiniciar').onclick = () => iaReIniciar();
+  $('#wam-repausa').onclick = () => bulkPause();
+  $('#wam-redetener').onclick = () => bulkStop();
   $('#iaInstr').oninput = (e) => { cfg.ia.instrucciones = e.target.value.slice(0, 3000); save(); renderIaTrain(); };
   $('#wam-iaupdate').onclick = () => {
     if (!iaTrainDirty()) return;
@@ -1553,7 +1696,7 @@
     if (!wamIa) return;
     iaSeen = wamIa.seen || {}; iaSug = Array.isArray(wamIa.sug) ? wamIa.sug : []; iaHuman = Array.isArray(wamIa.human) ? wamIa.human : [];
     iaCount = wamIa.count || iaCount;
-    iaEngaged = wamIa.engaged || {}; iaSentT = wamIa.sentT || {}; iaPause = wamIa.pause || {};
+    iaEngaged = wamIa.engaged || {}; iaSentT = wamIa.sentT || {}; iaPause = wamIa.pause || {}; iaReSent = wamIa.reSent || {};
     renderIaSug(); renderIaHuman();
   });
   chrome.storage.local.get('wamLog').then(({ wamLog }) => { if (Array.isArray(wamLog)) sendLog = wamLog; });
@@ -1571,6 +1714,9 @@
     if (cfg.source !== 'excel') cfg.source = 'label';
     cfg.ia = { ...DEFAULTS.ia, ...(wamCfg && wamCfg.ia ? wamCfg.ia : {}) };
     if (!Array.isArray(cfg.ia.labels)) cfg.ia.labels = [];
+    if (!Array.isArray(cfg.ia.reLabels)) cfg.ia.reLabels = [];
+    cfg.ia.reLabels = cfg.ia.reLabels.map(String);
+    { const d = Number(cfg.ia.reDias); cfg.ia.reDias = Number.isFinite(d) ? Math.min(3650, Math.max(0, d)) : 3; }
     if (iaMin(cfg.ia.inicio) === null) cfg.ia.inicio = '08:00';
     if (iaMin(cfg.ia.cierre) === null) cfg.ia.cierre = '20:00';
     if (!['nuevos', 'palabras'].includes(cfg.ia.scope)) cfg.ia.scope = 'etiquetas'; // ya no existe "todos": hay que elegir etiquetas, mensajes nuevos o palabras clave
