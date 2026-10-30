@@ -62,7 +62,7 @@
     hourTo: 20,
     source: 'label',
     cc: '',
-    ia: { on: false, mode: 'sugerencia', scope: 'etiquetas', labels: [], instrucciones: '', maxDia: 100, horas: 0, instrAplicadas: '', horarioOn: true, inicio: '08:00', cierre: '20:00', consent: false },
+    ia: { on: false, mode: 'sugerencia', scope: 'etiquetas', labels: [], instrucciones: '', maxDia: 100, horas: 0, instrAplicadas: '', horarioOn: true, inicio: '08:00', cierre: '20:00', palabras: '', consent: false },
     messages: [...EXAMPLE_MSGS],
   };
   let cfg = { ...DEFAULTS };
@@ -240,7 +240,13 @@
         <select id="iaScope">
           <option value="etiquetas">Chats con las etiquetas que marque (leídos o no)</option>
           <option value="nuevos">Mensajes nuevos: conversaciones nuevas (leídos o no)</option>
+          <option value="palabras">Palabras clave: cuando el cliente escriba alguna</option>
         </select>
+        <div id="wam-iakwbox" hidden>
+          <div class="wam-hint"><b>Palabras clave</b> (separadas por coma, o una por línea)</div>
+          <textarea id="iaKw" rows="3" maxlength="2000" placeholder="precio, cuánto cuesta, cita, información, promoción"></textarea>
+          <p class="wam-hint">La IA se activa en un chat cuando el mensaje pendiente del cliente contiene alguna de estas palabras (sin importar mayúsculas ni tildes). Desde ese momento sigue la conversación aunque ya no use la palabra. Sirve para cualquier chat individual, tenga o no etiqueta.</p>
+        </div>
         <p class="wam-hint">Al activarla busca los chats y, si falta tu respuesta (el último mensaje es del cliente), continúa la conversación, leído o no. Solo chats individuales (no grupos). Si una persona del equipo responde en un chat, la IA se aparta de ese chat 24 horas.</p>
 
         <div class="wam-hint"><b>Etiquetas que usará la IA</b> (elige al menos una)</div>
@@ -1198,6 +1204,21 @@
     iaHuman.unshift({ chatId: c.id, name: c.name, motivo, t });
   };
 
+  // ----- palabras clave: la IA se activa en un chat cuando el cliente escribe alguna -----
+  const iaNorm = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const iaKeywords = () => [...new Set(String(cfg.ia.palabras || '').split(/[\n,;]+/).map((x) => iaNorm(x).trim()).filter((x) => x.length >= 2))];
+  const iaEsc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // ¿lo pendiente del cliente (sus mensajes desde la última respuesta del negocio) contiene una palabra clave? Coincide por palabra completa.
+  const iaMatchKw = (c) => {
+    const kws = iaKeywords();
+    if (!kws.length) return false;
+    const txt = [];
+    for (let i = c.msgs.length - 1; i >= 0 && c.msgs[i].de === 'cliente'; i--) if (c.msgs[i].texto) txt.push(c.msgs[i].texto);
+    const t = ' ' + iaNorm(txt.join(' \n ')) + ' ';
+    return kws.some((k) => new RegExp('(^|[^a-z0-9])' + iaEsc(k) + '([^a-z0-9]|$)').test(t));
+  };
+  const renderIaKw = () => { $('#wam-iakwbox').hidden = cfg.ia.scope !== 'palabras'; };
+
   // ----- horario de trabajo de la IA: hora de inicio y hora de cierre -----
   const iaMin = (hhmm) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || '')); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
   const iaHorarioActivo = () => !!cfg.ia.horarioOn && iaMin(cfg.ia.inicio) !== null && iaMin(cfg.ia.cierre) !== null && iaMin(cfg.ia.inicio) !== iaMin(cfg.ia.cierre);
@@ -1307,6 +1328,8 @@
   const syncIa = () => {
     renderIaRun();
     $('#iaScope').value = cfg.ia.scope;
+    $('#iaKw').value = cfg.ia.palabras;
+    renderIaKw();
     $('#iaInstr').value = cfg.ia.instrucciones;
     renderIaTrain();
     $('#iaHorarioOn').checked = !!cfg.ia.horarioOn;
@@ -1393,6 +1416,7 @@
         if (!last || last.de !== 'cliente') continue; // ya respondió el negocio
         if (cfg.ia.horas > 0 && Date.now() / 1000 - last.t > cfg.ia.horas * 3600) continue; // mensaje demasiado viejo (0 = sin límite)
         if ((iaSeen[c.id] || 0) >= last.t) continue; // ya atendido
+        if (cfg.ia.scope === 'palabras' && !iaEngaged[c.id] && !iaMatchKw(c)) continue; // se activa solo si el cliente usó una palabra clave
         if (asked >= IA_MAX_PER_SCAN) { hayMas = true; break; } // el resto sigue en la próxima revisión (que arranca enseguida)
         if (!last.texto || last.tipo !== 'chat') {
           iaAddHuman(c, 'El último mensaje no es de texto (foto, audio, sticker…)', last.t);
@@ -1459,6 +1483,7 @@
   const iaStart = () => {
     if (cfg.ia.on) return;
     if (!cfg.ia.labels.length) { iaWarn('Primero elige al menos una etiqueta que usará la IA.'); return; }
+    if (cfg.ia.scope === 'palabras' && !iaKeywords().length) { iaWarn('Escribe al menos una palabra clave para activar la IA.'); return; }
     if (!lic.valid) { iaWarn('La licencia no está activa.'); return; }
     if (!cfg.ia.consent && !confirm('Las conversaciones con respuesta pendiente se enviarán a un servicio de IA para generar las respuestas. ¿Continuar?')) return;
     if (cfg.ia.mode === 'auto' && !confirm('En modo automático la IA responderá sola a tus clientes. ¿Iniciarla?')) return;
@@ -1489,7 +1514,9 @@
       if (cfg.ia.on) iaScan(true);
     };
   });
-  $('#iaScope').onchange = (e) => { cfg.ia.scope = e.target.value; save(); if (cfg.ia.on) iaScan(true); };
+  $('#iaScope').onchange = (e) => { cfg.ia.scope = e.target.value; save(); renderIaKw(); if (cfg.ia.on) iaScan(true); };
+  $('#iaKw').oninput = (e) => { cfg.ia.palabras = e.target.value.slice(0, 2000); save(); };
+  $('#iaKw').onchange = () => { if (cfg.ia.on && cfg.ia.scope === 'palabras') iaScan(true); };
   const iaHorarioCambio = () => { save(); renderIaHorario(); if (cfg.ia.on) iaScan(true); };
   $('#iaHorarioOn').onchange = (e) => { cfg.ia.horarioOn = e.target.checked; iaHorarioCambio(); };
   $('#iaInicio').onchange = (e) => { if (iaMin(e.target.value) !== null) cfg.ia.inicio = e.target.value; else e.target.value = cfg.ia.inicio; iaHorarioCambio(); };
@@ -1546,7 +1573,7 @@
     if (!Array.isArray(cfg.ia.labels)) cfg.ia.labels = [];
     if (iaMin(cfg.ia.inicio) === null) cfg.ia.inicio = '08:00';
     if (iaMin(cfg.ia.cierre) === null) cfg.ia.cierre = '20:00';
-    if (cfg.ia.scope !== 'nuevos') cfg.ia.scope = 'etiquetas'; // ya no existe "todos": hay que elegir etiquetas o mensajes nuevos
+    if (!['nuevos', 'palabras'].includes(cfg.ia.scope)) cfg.ia.scope = 'etiquetas'; // ya no existe "todos": hay que elegir etiquetas, mensajes nuevos o palabras clave
     { const h = Number(cfg.ia.horas); cfg.ia.horas = Number.isFinite(h) ? Math.min(720, Math.max(0, h)) : 0; }
     if (!cfg.ia.horasEditada) cfg.ia.horas = 0; // por defecto sin límite: revisa todas las conversaciones pendientes y responde según el contexto
     if (typeof cfg.ia.instrAplicadas !== 'string') cfg.ia.instrAplicadas = cfg.ia.instrucciones || ''; // entrenamiento ya aplicado (versiones anteriores)
