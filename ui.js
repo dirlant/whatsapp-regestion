@@ -241,7 +241,7 @@
         <div id="wam-iakwbox" hidden>
           <div class="wam-hint"><b>Palabras claves para activar al asistente</b></div>
           <div id="wam-kwchips" class="wam-chips"><input id="iaKwInput" placeholder="Escribe una palabra y pulsa Enter" autocomplete="off" maxlength="60"></div>
-          <p class="wam-hint">Escribe una palabra o frase y pulsa <b>Enter</b> para agregarla; toca la × para quitarla. Sin importar mayúsculas ni tildes, y por palabra completa. Desde que se activa en un chat, el asistente sigue la conversación aunque el cliente ya no use la palabra.</p>
+          <p class="wam-hint">Escribe una palabra o frase y pulsa <b>Enter</b> para agregarla; toca la × para quitarla. No distingue mayúsculas, minúsculas ni tildes («PRECIO», «Precio» y «precio» son lo mismo), y detecta la palabra aunque lleve más letras al final: «precio» también encuentra «precios». Desde que se activa en un chat, el asistente sigue la conversación aunque el cliente ya no use la palabra.</p>
         </div>
         <p class="wam-hint">Al activarla busca los chats y, si falta tu respuesta (el último mensaje es del cliente), continúa la conversación, leído o no. Solo chats individuales (no grupos). Si una persona del equipo responde en un chat, la IA se aparta de ese chat 24 horas.</p>
 
@@ -1277,7 +1277,7 @@
   };
 
   // ----- palabras clave: la IA se activa en un chat cuando el cliente escribe alguna -----
-  const iaNorm = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const iaNorm = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' '); // sin tildes, en minusculas y con espacios o saltos de linea repetidos como uno
   // lista de palabras claves tal como las escribió el usuario (sin repetidas, mínimo 2 letras); se guarda una por línea
   const iaKwLista = () => {
     const vistas = new Set();
@@ -1291,14 +1291,14 @@
   };
   const iaKeywords = () => [...new Set(String(cfg.ia.palabras || '').split(/[\n,;]+/).map((x) => iaNorm(x).trim()).filter((x) => x.length >= 2))];
   const iaEsc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  // ¿lo pendiente del cliente (sus mensajes desde la última respuesta del negocio) contiene una palabra clave? Coincide por palabra completa.
+  // ¿lo pendiente del cliente (sus mensajes desde la última respuesta del negocio) contiene una palabra clave? No distingue mayúsculas ni tildes. La palabra clave debe EMPEZAR una palabra del mensaje: «precio» encuentra «precio», «Precios» y «¿PRECIO?», pero no «aprecio» (a mitad de palabra).
   const iaMatchKw = (c) => {
     const kws = iaKeywords();
     if (!kws.length) return false;
     const txt = [];
     for (let i = c.msgs.length - 1; i >= 0 && c.msgs[i].de === 'cliente'; i--) if (c.msgs[i].texto) txt.push(c.msgs[i].texto);
     const t = ' ' + iaNorm(txt.join(' \n ')) + ' ';
-    return kws.some((k) => new RegExp('(^|[^a-z0-9])' + iaEsc(k) + '([^a-z0-9]|$)').test(t));
+    return kws.some((k) => new RegExp('(^|[^a-z0-9])' + iaEsc(k)).test(t)); // inicio de palabra, sin exigir el final (plurales y variantes)
   };
   // ----- modalidades: se pueden activar una o varias -----
   // Las modalidades de "qué chats" se SUMAN (basta con cumplir una): etiquetas, palabras claves, todos, nuevas.
