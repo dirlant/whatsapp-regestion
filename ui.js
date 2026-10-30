@@ -82,7 +82,13 @@
   root.id = 'wam-root';
   root.innerHTML = `
   <div id="wam-panel" hidden>
-    <div class="wam-head"><img id="wam-logo" alt=""><div class="wam-title" title="Envíos masivos"><img id="wam-word" alt="Beautychat"></div><button id="wam-about" class="wam-aboutbtn" title="Estado y licencia">Acerca</button><button id="wam-close" title="Cerrar">×</button></div>
+    <div class="wam-head"><img id="wam-logo" alt=""><div class="wam-title" title="Envíos masivos"><img id="wam-word" alt="Beautychat"></div><button id="wam-bell" class="wam-bell" title="Avisos"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><b id="wam-avibadge" class="wam-badge" hidden></b></button><button id="wam-about" class="wam-aboutbtn" title="Estado y licencia">Acerca</button><button id="wam-close" title="Cerrar">×</button></div>
+    <div id="wam-avibox" hidden>
+      <div class="wam-avihead"><b>Avisos</b></div>
+      <div class="wam-sum"><span id="wam-avinfo">Sin avisos.</span>
+        <span><a id="wam-avrefresh">Actualizar</a> · <a id="wam-avreadall">Marcar todos como leídos</a></span></div>
+      <div id="wam-avlist"></div>
+    </div>
     <div id="wam-aboutbox" hidden>
       <div class="wam-aboutrow"><span>Conexión</span><span id="wam-conn">…</span></div>
       <div class="wam-aboutrow"><span>Licencia</span><span id="wam-licstat"></span></div>
@@ -109,8 +115,6 @@
     <div class="wam-tabbar wam-seg">
       <button data-tab="env" class="on">Envío</button>
       <button data-tab="msg">Mensajes</button>
-      <button data-tab="met">Métricas</button>
-      <button data-tab="avi">Avisos<b id="wam-avibadge" class="wam-badge" hidden></b></button>
       <button data-tab="ia">IA</button>
     </div>
 
@@ -176,32 +180,8 @@
         <div class="wam-bar"><div id="wam-barfill"></div></div>
         <div id="wam-log"></div>
       </div>
-    </div>
 
-    <div class="wam-body" data-body="msg" hidden>
-      <h4>Mensajes</h4>
-      <div class="wam-card">
-        <div id="wam-msgs"></div>
-        <button id="wam-addmsg" class="wam-btn alt">+ Agregar otro mensaje</button>
-        <div class="wam-hint">Variables disponibles (toca una para insertarla):</div>
-        <div id="wam-vars" class="wam-vars"></div>
-        <button id="wam-examples" class="wam-btn alt">Cargar mensajes de ejemplo</button>
-        <p class="wam-hint">Crea todos los mensajes que quieras: cada envío elige uno al azar. <code>{Hola|Buenas}</code> = variante al azar.</p>
-        <div class="wam-prev" id="wam-prev"></div>
-      </div>
-    </div>
-
-    <div class="wam-body" data-body="avi" hidden>
-      <h4>Avisos</h4>
-      <div class="wam-card">
-        <div class="wam-sum"><span id="wam-avinfo">Sin avisos.</span>
-          <span><a id="wam-avrefresh">Actualizar</a> · <a id="wam-avreadall">Marcar todos como leídos</a></span></div>
-        <div id="wam-avlist"></div>
-      </div>
-    </div>
-
-    <div class="wam-body" data-body="met" hidden>
-      <h4>Resumen</h4>
+      <h4>Métricas · Resumen</h4>
       <div class="wam-card">
         <div class="wam-kpis">
           <div><b id="k-today">0</b><span>Enviados hoy</span></div>
@@ -220,6 +200,19 @@
       <div class="wam-card">
         <div id="wam-hist" class="wam-list small"></div>
         <button id="wam-clearmet" class="wam-btn alt danger">Borrar métricas</button>
+      </div>
+    </div>
+
+    <div class="wam-body" data-body="msg" hidden>
+      <h4>Mensajes</h4>
+      <div class="wam-card">
+        <div id="wam-msgs"></div>
+        <button id="wam-addmsg" class="wam-btn alt">+ Agregar otro mensaje</button>
+        <div class="wam-hint">Variables disponibles (toca una para insertarla):</div>
+        <div id="wam-vars" class="wam-vars"></div>
+        <button id="wam-examples" class="wam-btn alt">Cargar mensajes de ejemplo</button>
+        <p class="wam-hint">Crea todos los mensajes que quieras: cada envío elige uno al azar. <code>{Hola|Buenas}</code> = variante al azar.</p>
+        <div class="wam-prev" id="wam-prev"></div>
       </div>
     </div>
 
@@ -310,14 +303,19 @@
   $('#wam-word').src = chrome.runtime.getURL('icons/wordmark.png');
   $('#wam-close').onclick = () => (panel.hidden = true);
   $('#wam-aboutver').textContent = chrome.runtime.getManifest().version;
-  $('#wam-about').onclick = () => { const b = $('#wam-aboutbox'); b.hidden = !b.hidden; };
-  panel.addEventListener('click', (e) => { if (!e.target.closest('#wam-aboutbox, #wam-about')) $('#wam-aboutbox').hidden = true; });
+  // un solo desplegable abierto a la vez: avisos (campanita) o "Acerca"
+  const abrirAvisos = () => { $('#wam-aboutbox').hidden = true; $('#wam-avibox').hidden = false; renderNotifs(); fetchNotifs(true); };
+  $('#wam-about').onclick = () => { const b = $('#wam-aboutbox'); $('#wam-avibox').hidden = true; b.hidden = !b.hidden; };
+  $('#wam-bell').onclick = () => { if ($('#wam-avibox').hidden) abrirAvisos(); else $('#wam-avibox').hidden = true; };
+  panel.addEventListener('click', (e) => {
+    if (!e.target.closest('#wam-aboutbox, #wam-about')) $('#wam-aboutbox').hidden = true;
+    if (!e.target.closest('#wam-avibox, #wam-bell, #wam-avbar')) $('#wam-avibox').hidden = true;
+  });
   panel.querySelectorAll('.wam-tabbar button').forEach((b) => {
     b.onclick = () => {
       panel.querySelectorAll('.wam-tabbar button').forEach((x) => x.classList.toggle('on', x === b));
       panel.querySelectorAll('[data-body]').forEach((d) => (d.hidden = d.dataset.body !== b.dataset.tab));
-      if (b.dataset.tab === 'met') renderMetrics();
-      if (b.dataset.tab === 'avi') { renderNotifs(); fetchNotifs(true); }
+      if (b.dataset.tab === 'env') renderMetrics();
       if (b.dataset.tab === 'ia') { renderIaLabels(); renderIaReLabels(); renderIaSug(); renderIaHuman(); }
       $('#wam-foot-bulk').hidden = !(b.dataset.tab === 'env' || b.dataset.tab === 'msg'); // botones del envío masivo
       $('#wam-foot-ia').hidden = b.dataset.tab !== 'ia'; // botones de la IA
@@ -714,7 +712,7 @@
     sendLog.push({ t: Date.now(), ...e });
     if (sendLog.length > MAX_LOG) sendLog = sendLog.slice(-MAX_LOG);
     chrome.storage.local.set({ wamLog: sendLog });
-    if (!$('[data-body="met"]').hidden) renderMetrics();
+    if (!$('[data-body="env"]').hidden) renderMetrics();
   };
   const dayKey = (t) => { const d = new Date(t); return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); };
   const renderMetrics = () => {
@@ -818,7 +816,7 @@
     $('#wam-start').disabled = !lic.valid || !!(cfg.ia && cfg.ia.on);
   };
   $('#wam-licstat').onclick = () => { gateOpen = true; renderLic(); };
-  $('#wam-changelic').onclick = () => { $('#wam-aboutbox').hidden = true; gateOpen = true; renderLic(); };
+  $('#wam-changelic').onclick = () => { $('#wam-aboutbox').hidden = true; $('#wam-avibox').hidden = true; gateOpen = true; renderLic(); };
   $('#wam-gate-close').onclick = () => { gateOpen = false; renderLic(); };
 
   const fetchLicense = (token, numero) =>
@@ -882,6 +880,7 @@
   let notifs = [];
   let readIds = new Set();
   let lastNotifFetch = 0;
+  let avPrevUnread = -1; // para animar la campana solo cuando llega un aviso nuevo (no al cargar)
   const NOTIF_EVERY_MS = 60 * 60 * 1000; // los avisos se actualizan cada hora (además al abrir la pestaña Avisos o pulsar Actualizar)
   const TIPO_LABEL = { info: 'Información', aviso: 'Aviso', importante: 'Importante' };
   const saveRead = () => chrome.storage.local.set({ wamRead: [...readIds].slice(-500) });
@@ -897,6 +896,12 @@
     const badge = $('#wam-avibadge');
     badge.hidden = !un.length;
     badge.textContent = un.length;
+    const bell = $('#wam-bell');
+    if (bell && bell.classList && avPrevUnread >= 0 && un.length > avPrevUnread) { // llegó un aviso nuevo: la campana se mueve un momento
+      bell.classList.add('nuevo');
+      setTimeout(() => bell.classList.remove('nuevo'), 2500);
+    }
+    avPrevUnread = un.length;
     const bar = $('#wam-avbar');
     bar.hidden = !un.length;
     bar.className = 'wam-avbar' + (urgent ? ' urgent' : '');
@@ -904,7 +909,7 @@
     if (un.length) {
       const a = document.createElement('a');
       a.textContent = 'Tienes ' + un.length + (un.length === 1 ? ' aviso sin leer' : ' avisos sin leer') + ' — Ver';
-      a.onclick = () => panel.querySelector('.wam-tabbar button[data-tab="avi"]').click();
+      a.onclick = () => abrirAvisos();
       bar.appendChild(a);
     }
     try { chrome.runtime.sendMessage({ type: 'wam-badge', count: un.length, urgent }); } catch {}
@@ -1718,7 +1723,7 @@
     iaEngaged = wamIa.engaged || {}; iaSentT = wamIa.sentT || {}; iaPause = wamIa.pause || {}; iaReSent = wamIa.reSent || {};
     renderIaSug(); renderIaHuman();
   });
-  chrome.storage.local.get('wamLog').then(({ wamLog }) => { if (Array.isArray(wamLog)) sendLog = wamLog; });
+  chrome.storage.local.get('wamLog').then(({ wamLog }) => { if (Array.isArray(wamLog)) sendLog = wamLog; renderMetrics(); });
   chrome.storage.local.get('wamCfg').then(({ wamCfg }) => {
     cfg = { ...DEFAULTS, ...(wamCfg || {}) };
     if (wamCfg && wamCfg.message && !wamCfg.messages) cfg.messages = [wamCfg.message]; // versión anterior
