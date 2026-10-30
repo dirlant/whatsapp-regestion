@@ -790,6 +790,7 @@
   let notifs = [];
   let readIds = new Set();
   let lastNotifFetch = 0;
+  const NOTIF_EVERY_MS = 60 * 60 * 1000; // los avisos se actualizan cada hora (además al abrir la pestaña Avisos o pulsar Actualizar)
   const TIPO_LABEL = { info: 'Información', aviso: 'Aviso', importante: 'Importante' };
   const saveRead = () => chrome.storage.local.set({ wamRead: [...readIds].slice(-500) });
   // el servidor es la fuente de verdad (n.leida); readIds es solo la marca local hasta que el servidor confirma
@@ -858,7 +859,8 @@
   const markAttempts = new Map(); // id -> intentos de sincronizar la lectura (máx. 3, para no insistir sin fin)
   const fetchNotifs = async (force = false, markId = '') => {
     if (!lic.token || !lic.number) return false;
-    if (!force && Date.now() - lastNotifFetch < 60000) return false;
+    // consultas automáticas: como máximo una por hora (55 min de margen para que el temporizador de 1 h no quede justo por debajo)
+    if (!force && Date.now() - lastNotifFetch < NOTIF_EVERY_MS - 5 * 60 * 1000) return false;
     if (!force) markAttempts.clear(); // cada consulta periódica vuelve a intentar las lecturas pendientes
     lastNotifFetch = Date.now();
     const payload = { type: 'wam-notifs', token: lic.token, numero: lic.number };
@@ -892,7 +894,7 @@
   };
   $('#wam-avrefresh').onclick = () => fetchNotifs(true);
   $('#wam-avreadall').onclick = () => markRead(unreadList().map((n) => n.id));
-  setInterval(() => fetchNotifs(), 15 * 60 * 1000);
+  setInterval(() => fetchNotifs(), NOTIF_EVERY_MS);
 
   // ---------- envío ----------
   const fmt = (s) => { s = Math.round(s); return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`; };
