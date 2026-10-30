@@ -163,3 +163,6 @@ details label{display:flex;justify-content:space-between;align-items:center;marg
 .wam-avihead{font-size:15px;margin-bottom:6px}
 @keyframes wam-ring{0%,100%{transform:rotate(0)}15%{transform:rotate(14deg)}30%{transform:rotate(-12deg)}45%{transform:rotate(9deg)}60%{transform:rotate(-6deg)}75%{transform:rotate(3deg)}}
 .wam-bell.nuevo svg{animation:wam-ring .9s ease-in-out 2;transform-origin:50% 10%}
+
+.wam-sw small{display:block;margin-top:2px;font-size:11.5px;font-weight:400;color:var(--sub);line-height:1.25}
+#wam-iamodos .wam-sw>span{flex:1;padding-right:10px}

@@ -62,7 +62,7 @@
     hourTo: 20,
     source: 'label',
     cc: '',
-    ia: { on: false, mode: 'sugerencia', scope: 'etiquetas', labels: [], instrucciones: '', maxDia: 100, horas: 0, instrAplicadas: '', horarioOn: true, inicio: '08:00', cierre: '20:00', palabras: '', reLabels: [], reDias: 3, kwExtra: false, consent: false },
+    ia: { on: false, mode: 'sugerencia', scope: 'etiquetas', modos: { etiquetas: true, palabras: false, todos: false, nuevos: false, noLeidos: false }, labels: [], instrucciones: '', maxDia: 100, horas: 0, instrAplicadas: '', horarioOn: true, inicio: '08:00', cierre: '20:00', palabras: '', reLabels: [], reDias: 3, kwExtra: false, consent: false },
     messages: [...EXAMPLE_MSGS],
   };
   let cfg = { ...DEFAULTS };
@@ -229,16 +229,20 @@
         </div>
         <p class="wam-hint">Sugerencia: la IA propone y tú apruebas. Automático: la IA responde sola y enseguida (unos 3 segundos), respetando el horario y el límite diario. Las pausas largas son solo para los envíos masivos.</p>
 
-        <div class="wam-hint"><b>A quién atiende</b></div>
-        <select id="iaScope">
-          <option value="etiquetas">Chats con las etiquetas que marque (leídos o no)</option>
-          <option value="nuevos">Mensajes nuevos: conversaciones nuevas (leídos o no)</option>
-          <option value="palabras">Palabras claves: se activa cuando el cliente escriba alguna</option>
-        </select>
-        <div class="wam-hint" style="margin-top:10px"><b>Palabras claves para activar al asistente</b> (separadas por coma, o una por línea)</div>
-        <textarea id="iaKw" rows="3" maxlength="2000" placeholder="precio, cuánto cuesta, cita, información, promoción"></textarea>
-        <label class="wam-sw" id="wam-iakwextra-row"><span>Activar al asistente en cualquier chat cuando un mensaje entrante contenga una palabra clave</span><input type="checkbox" id="iaKwExtra"><i></i></label>
-        <p class="wam-hint" id="wam-iakwhint"></p>
+        <div class="wam-hint"><b>Modalidades</b> (activa una o varias)</div>
+        <div id="wam-iamodos">
+          <label class="wam-sw"><span>Por etiquetas<small>Chats con las etiquetas que elijas más abajo.</small></span><input type="checkbox" data-modo="etiquetas"><i></i></label>
+          <label class="wam-sw"><span>Por palabras claves<small>Cuando un mensaje entrante contenga alguna palabra clave.</small></span><input type="checkbox" data-modo="palabras"><i></i></label>
+          <label class="wam-sw"><span>Para todos los chats<small>Cualquier chat individual con respuesta pendiente.</small></span><input type="checkbox" data-modo="todos"><i></i></label>
+          <label class="wam-sw"><span>Conversaciones nuevas<small>Chats donde el negocio todavía no ha escrito.</small></span><input type="checkbox" data-modo="nuevos"><i></i></label>
+          <label class="wam-sw"><span>Solo no leídos<small>Limita lo anterior a los chats con mensajes sin leer.</small></span><input type="checkbox" data-modo="noLeidos"><i></i></label>
+        </div>
+        <p class="wam-hint" id="wam-iamodohint"></p>
+        <div id="wam-iakwbox" hidden>
+          <div class="wam-hint"><b>Palabras claves para activar al asistente</b> (separadas por coma, o una por línea)</div>
+          <textarea id="iaKw" rows="3" maxlength="2000" placeholder="precio, cuánto cuesta, cita, información, promoción"></textarea>
+          <p class="wam-hint">Sin importar mayúsculas ni tildes, y por palabra completa. Desde que se activa en un chat, el asistente sigue la conversación aunque el cliente ya no use la palabra.</p>
+        </div>
         <p class="wam-hint">Al activarla busca los chats y, si falta tu respuesta (el último mensaje es del cliente), continúa la conversación, leído o no. Solo chats individuales (no grupos). Si una persona del equipo responde en un chat, la IA se aparta de ese chat 24 horas.</p>
 
         <div class="wam-hint"><b>Etiquetas que usará la IA</b> (elige al menos una)</div>
@@ -1285,18 +1289,56 @@
     const t = ' ' + iaNorm(txt.join(' \n ')) + ' ';
     return kws.some((k) => new RegExp('(^|[^a-z0-9])' + iaEsc(k) + '([^a-z0-9]|$)').test(t));
   };
-  // Las palabras clave se comparan con el mensaje pendiente del cliente (sin mayúsculas ni tildes, por palabra completa).
-  const renderIaKw = () => {
-    const soloPalabras = cfg.ia.scope === 'palabras';
-    $('#wam-iakwextra-row').hidden = soloPalabras; // en ese alcance las palabras clave ya son la única forma de activarse
-    $('#iaKwExtra').checked = !!cfg.ia.kwExtra;
-    $('#wam-iakwhint').textContent = soloPalabras
-      ? 'La IA solo se activa en un chat cuando el mensaje entrante del cliente contiene alguna de estas palabras; desde ahí sigue la conversación aunque ya no las use. Sirve para cualquier chat individual, tenga o no etiqueta.'
-      : cfg.ia.kwExtra
-        ? 'Además de los chats del alcance elegido, la IA se activa en CUALQUIER chat individual cuando un mensaje entrante contiene alguna de estas palabras.'
-        : 'Opcional: activa el interruptor para que la IA también se active, en cualquier chat, cuando un mensaje entrante contenga una de estas palabras.';
+  // ----- modalidades: se pueden activar una o varias -----
+  // Las modalidades de "qué chats" se SUMAN (basta con cumplir una): etiquetas, palabras claves, todos, nuevas.
+  // "Solo no leídos" es una restricción: limita esos chats a los que tengan mensajes sin leer (y, sola, atiende todos los no leídos).
+  const MODOS_QUE = ['etiquetas', 'palabras', 'todos', 'nuevos'];
+  const iaModosActivos = () => ['etiquetas', 'palabras', 'todos', 'nuevos', 'noLeidos'].filter((k) => cfg.ia.modos[k]);
+  const renderIaModos = () => {
+    const m = cfg.ia.modos;
+    panel.querySelectorAll('#wam-iamodos input[data-modo]').forEach((i) => { i.checked = !!m[i.dataset.modo]; });
+    $('#wam-iakwbox').hidden = !m.palabras;
+    const nombres = { etiquetas: 'con las etiquetas elegidas', palabras: 'cuando un mensaje entrante tenga una palabra clave', todos: 'todos los chats individuales', nuevos: 'las conversaciones nuevas' };
+    const que = MODOS_QUE.filter((k) => m[k]);
+    let t;
+    if (!iaModosActivos().length) t = 'Activa al menos una modalidad para que la IA pueda funcionar.';
+    else if (!que.length) t = 'La IA atiende todos los chats individuales que tengan mensajes sin leer.';
+    else {
+      t = 'La IA atiende: ' + que.map((k) => nombres[k]).join(' · ') + '.' + (que.length > 1 && !m.todos ? ' Basta con que el chat cumpla UNA de ellas.' : '');
+      if (m.todos && que.length > 1) t += ' Con «todos los chats», las demás modalidades no restringen nada.';
+      if (m.noLeidos) t += ' Y solo en chats con mensajes sin leer.';
+    }
+    $('#wam-iamodohint').textContent = t;
   };
-  const iaKwEnUso = () => cfg.ia.scope === 'palabras' || !!cfg.ia.kwExtra; // ¿las palabras clave participan en la activación?
+  // ¿este chat entra en alguna modalidad activa?
+  const iaCalifica = (c) => {
+    const m = cfg.ia.modos;
+    if (m.noLeidos && !(Number(c.unread) > 0)) return false; // restricción "solo no leídos"
+    if (iaEngaged[c.id]) return true; // lo que la IA ya viene atendiendo continúa sin volver a calificar
+    if (!MODOS_QUE.some((k) => m[k])) return true; // solo "no leídos": todos los no leídos
+    if (m.todos) return true;
+    if (m.etiquetas && (c.labels || []).some((l) => cfg.ia.labels.includes(l))) return true;
+    if (m.nuevos && c.nuevo) return true;
+    if (m.palabras && iaMatchKw(c)) return true;
+    return false;
+  };
+  // qué chats pedirle al puente: con una sola modalidad de etiquetas o de nuevos se le pide solo eso; si no, todos y se filtra acá
+  const iaPeticion = () => {
+    const m = cfg.ia.modos;
+    const soloEtiq = m.etiquetas && !m.palabras && !m.todos && !m.nuevos;
+    const soloNuevos = m.nuevos && !m.etiquetas && !m.palabras && !m.todos;
+    if (soloEtiq) return { scope: 'etiquetas', limit: 60 };
+    if (soloNuevos) return { scope: 'nuevos', limit: 60 };
+    return { scope: 'palabras', limit: 120 }; // todos los chats individuales
+  };
+  const iaSetModo = (clave, on) => {
+    cfg.ia.modos[clave] = !!on;
+    save();
+    renderIaModos();
+    if (!iaModosActivos().length && cfg.ia.on) { cfg.ia.on = false; save(); renderIaRun(); iaWarn('La IA se pausó: tiene que haber al menos una modalidad activa.'); }
+    else if (cfg.ia.on) iaScan(true);
+  };
+  panel.querySelectorAll('#wam-iamodos input[data-modo]').forEach((i) => { i.onchange = () => iaSetModo(i.dataset.modo, i.checked); });
 
   // ----- horario de trabajo de la IA: hora de inicio y hora de cierre -----
   const iaMin = (hhmm) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || '')); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
@@ -1415,9 +1457,8 @@
     renderIaRun();
     $('#iaReDias').value = cfg.ia.reDias;
     renderIaReLabels();
-    $('#iaScope').value = cfg.ia.scope;
     $('#iaKw').value = cfg.ia.palabras;
-    renderIaKw();
+    renderIaModos();
     $('#iaInstr').value = cfg.ia.instrucciones;
     renderIaTrain();
     $('#iaHorarioOn').checked = !!cfg.ia.horarioOn;
@@ -1484,9 +1525,8 @@
       const st = await call('status');
       if (!st.ready) { setTimeout(() => iaScan(false), 5000); return setIaStatus('Esperando a que WhatsApp termine de cargar…'); }
       setIaStatus('Revisando chats…');
-      // con el interruptor de palabras clave se piden TODOS los chats individuales y el alcance se evalúa acá
-      const amplio = !!cfg.ia.kwExtra && cfg.ia.scope !== 'palabras';
-      const cands = await call('iaCandidates', { scope: amplio ? 'palabras' : cfg.ia.scope, labelIds: cfg.ia.labels, limit: amplio ? 120 : 60, maxAgeSec: full ? cfg.ia.horas * 3600 : 0, incluir: Object.keys(iaEngaged), solo: onlyIds || undefined });
+      const pet = iaPeticion();
+      const cands = await call('iaCandidates', { scope: pet.scope, labelIds: cfg.ia.labels, limit: pet.limit, maxAgeSec: full ? cfg.ia.horas * 3600 : 0, incluir: Object.keys(iaEngaged), solo: onlyIds || undefined });
       let asked = 0;
       let nuevas = 0;
       let aviso = ''; // problema de esta revisión: se muestra en lugar del resumen
@@ -1506,13 +1546,7 @@
         if (!last || last.de !== 'cliente') continue; // ya respondió el negocio
         if (cfg.ia.horas > 0 && Date.now() / 1000 - last.t > cfg.ia.horas * 3600) continue; // mensaje demasiado viejo (0 = sin límite)
         if ((iaSeen[c.id] || 0) >= last.t) continue; // ya atendido
-        if (!iaEngaged[c.id]) { // los chats que la IA ya viene atendiendo continúan sin necesitar la palabra
-          if (cfg.ia.scope === 'palabras') { if (!iaMatchKw(c)) continue; }
-          else if (amplio) {
-            const enAlcance = cfg.ia.scope === 'etiquetas' ? c.labels.some((l) => cfg.ia.labels.includes(l)) : !!c.nuevo;
-            if (!enAlcance && !iaMatchKw(c)) continue; // ni está en el alcance ni usó una palabra clave
-          }
-        }
+        if (!iaCalifica(c)) continue; // no entra en ninguna modalidad activa
         if (asked >= IA_MAX_PER_SCAN) { hayMas = true; break; } // el resto sigue en la próxima revisión (que arranca enseguida)
         if (!last.texto || last.tipo !== 'chat') {
           iaAddHuman(c, 'El último mensaje no es de texto (foto, audio, sticker…)', last.t);
@@ -1658,8 +1692,10 @@
   const iaStart = () => {
     if (cfg.ia.on) return;
     if (run.state === 'running') { iaWarn('Hay un envío masivo en curso: espera a que termine o detenlo para iniciar la IA. Solo puede funcionar una de las dos a la vez.'); return; }
+    if (!iaModosActivos().length) { iaWarn('Activa al menos una modalidad (por etiquetas, palabras claves, todos los chats…).'); return; }
     if (!cfg.ia.labels.length) { iaWarn('Primero elige al menos una etiqueta que usará la IA.'); return; }
-    if (iaKwEnUso() && !iaKeywords().length) { iaWarn('Escribe al menos una palabra clave (o apaga el interruptor de palabras clave).'); return; }
+    if (cfg.ia.modos.palabras && !iaKeywords().length) { iaWarn('Escribe al menos una palabra clave (o apaga la modalidad «Por palabras claves»).'); return; }
+    if (cfg.ia.modos.todos && cfg.ia.mode === 'auto' && !confirm('Con «Para todos los chats» el asistente responderá solo a TODAS las conversaciones individuales con respuesta pendiente, incluso antiguas. Conviene probar antes en modo Sugerencia. ¿Iniciarlo igual?')) return;
     if (!lic.valid) { iaWarn('La licencia no está activa.'); return; }
     if (!cfg.ia.consent && !confirm('Las conversaciones con respuesta pendiente se enviarán a un servicio de IA para generar las respuestas. ¿Continuar?')) return;
     if (cfg.ia.mode === 'auto' && !confirm('En modo automático la IA responderá sola a tus clientes. ¿Iniciarla?')) return;
@@ -1690,10 +1726,8 @@
       if (cfg.ia.on) iaScan(true);
     };
   });
-  $('#iaScope').onchange = (e) => { cfg.ia.scope = e.target.value; save(); renderIaKw(); if (cfg.ia.on) iaScan(true); };
   $('#iaKw').oninput = (e) => { cfg.ia.palabras = e.target.value.slice(0, 2000); save(); };
-  $('#iaKw').onchange = () => { if (cfg.ia.on && iaKwEnUso()) iaScan(true); };
-  $('#iaKwExtra').onchange = (e) => { cfg.ia.kwExtra = e.target.checked; save(); renderIaKw(); if (cfg.ia.on) iaScan(true); };
+  $('#iaKw').onchange = () => { if (cfg.ia.on && cfg.ia.modos.palabras) iaScan(true); };
   const iaHorarioCambio = () => { save(); renderIaHorario(); if (cfg.ia.on) iaScan(true); };
   $('#iaHorarioOn').onchange = (e) => { cfg.ia.horarioOn = e.target.checked; iaHorarioCambio(); };
   $('#iaInicio').onchange = (e) => { if (iaMin(e.target.value) !== null) cfg.ia.inicio = e.target.value; else e.target.value = cfg.ia.inicio; iaHorarioCambio(); };
@@ -1758,7 +1792,11 @@
     { const d = Number(cfg.ia.reDias); cfg.ia.reDias = Number.isFinite(d) ? Math.min(3650, Math.max(0, d)) : 3; }
     if (iaMin(cfg.ia.inicio) === null) cfg.ia.inicio = '08:00';
     if (iaMin(cfg.ia.cierre) === null) cfg.ia.cierre = '20:00';
-    if (!['nuevos', 'palabras'].includes(cfg.ia.scope)) cfg.ia.scope = 'etiquetas'; // ya no existe "todos": hay que elegir etiquetas, mensajes nuevos o palabras clave
+    { // configuraciones anteriores: alcance único (etiquetas / nuevos / palabras) + interruptor de palabras -> modalidades
+      const g = wamCfg && wamCfg.ia ? wamCfg.ia : {};
+      if (g.modos && typeof g.modos === 'object') cfg.ia.modos = { ...DEFAULTS.ia.modos, ...g.modos };
+      else cfg.ia.modos = { etiquetas: g.scope !== 'nuevos' && g.scope !== 'palabras', nuevos: g.scope === 'nuevos', palabras: g.scope === 'palabras' || !!g.kwExtra, todos: false, noLeidos: false };
+    }
     { const h = Number(cfg.ia.horas); cfg.ia.horas = Number.isFinite(h) ? Math.min(720, Math.max(0, h)) : 0; }
     if (!cfg.ia.horasEditada) cfg.ia.horas = 0; // por defecto sin límite: revisa todas las conversaciones pendientes y responde según el contexto
     if (typeof cfg.ia.instrAplicadas !== 'string') cfg.ia.instrAplicadas = cfg.ia.instrucciones || ''; // entrenamiento ya aplicado (versiones anteriores)
