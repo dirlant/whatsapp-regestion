@@ -62,7 +62,7 @@
     hourTo: 20,
     source: 'label',
     cc: '',
-    ia: { on: false, mode: 'sugerencia', scope: 'etiquetas', labels: [], instrucciones: '', maxDia: 100, horas: 12, consent: false },
+    ia: { on: false, mode: 'sugerencia', scope: 'etiquetas', labels: [], instrucciones: '', maxDia: 100, horas: 72, consent: false },
     messages: [...EXAMPLE_MSGS],
   };
   let cfg = { ...DEFAULTS };
@@ -242,7 +242,7 @@
           <option value="etiquetas">Chats con las etiquetas que marque (leídos o no)</option>
           <option value="nuevos">Mensajes nuevos: conversaciones nuevas (leídos o no)</option>
         </select>
-        <p class="wam-hint">La IA mantiene la conversación: contesta cada mensaje del cliente, leído o no, mientras el último mensaje sea suyo. Solo chats individuales (no grupos). Si una persona del equipo responde en un chat, la IA se aparta de ese chat 24 horas.</p>
+        <p class="wam-hint">Al activarla busca los chats y, si falta tu respuesta (el último mensaje es del cliente), continúa la conversación, leído o no. Solo chats individuales (no grupos). Si una persona del equipo responde en un chat, la IA se aparta de ese chat 24 horas.</p>
 
         <div class="wam-hint"><b>Etiquetas que usará la IA</b> (elige al menos una)</div>
         <div id="wam-ialabels" class="wam-list"></div>
@@ -250,7 +250,7 @@
         <div class="wam-hint" style="margin-top:10px"><b>Instrucciones para la IA</b></div>
         <textarea id="iaInstr" rows="6" maxlength="3000" placeholder="Qué vendes o qué servicio das, tono, precios, horarios, qué NO debe hacer… La IA solo usa esta información; si no está aquí, pasa el chat a una persona."></textarea>
 
-        <label>Responder solo mensajes de las últimas (horas) <span><input type="number" id="iaHoras" min="1" max="168"></span></label>
+        <label>Atender conversaciones pendientes de las últimas (horas; 0 = sin límite) <span><input type="number" id="iaHoras" min="0" max="720"></span></label>
         <label>Máx. respuestas automáticas por día <span><input type="number" id="iaMax" min="1"></span></label>
         <button id="wam-ianow" class="wam-btn alt">Revisar ahora</button>
       </div>
@@ -1356,7 +1356,7 @@
           continue;
         }
         if (!last || last.de !== 'cliente') continue; // ya respondió el negocio
-        if (Date.now() / 1000 - last.t > cfg.ia.horas * 3600) continue; // mensaje demasiado viejo
+        if (cfg.ia.horas > 0 && Date.now() / 1000 - last.t > cfg.ia.horas * 3600) continue; // mensaje demasiado viejo (0 = sin límite)
         if ((iaSeen[c.id] || 0) >= last.t) continue; // ya atendido
         if (asked >= IA_MAX_PER_SCAN) { hayMas = true; break; } // el resto sigue en la próxima revisión (que arranca enseguida)
         if (!last.texto || last.tipo !== 'chat') {
@@ -1435,7 +1435,14 @@
     };
   });
   $('#iaScope').onchange = (e) => { cfg.ia.scope = e.target.value; save(); if (cfg.ia.on) iaScan(true); };
-  $('#iaHoras').onchange = (e) => { cfg.ia.horas = Math.min(168, Math.max(1, +e.target.value || 12)); e.target.value = cfg.ia.horas; save(); if (cfg.ia.on) iaScan(true); };
+  $('#iaHoras').onchange = (e) => {
+    const v = Number(e.target.value);
+    cfg.ia.horas = e.target.value !== '' && Number.isFinite(v) ? Math.min(720, Math.max(0, Math.round(v))) : 72;
+    cfg.ia.horasEditada = true;
+    e.target.value = cfg.ia.horas;
+    save();
+    if (cfg.ia.on) iaScan(true);
+  };
   $('#iaInstr').oninput = (e) => { cfg.ia.instrucciones = e.target.value.slice(0, 3000); save(); };
   $('#iaMax').onchange = (e) => { cfg.ia.maxDia = Math.max(1, +e.target.value || 1); e.target.value = cfg.ia.maxDia; save(); };
   $('#wam-ianow').onclick = () => iaScan(true);
@@ -1477,7 +1484,8 @@
     cfg.ia = { ...DEFAULTS.ia, ...(wamCfg && wamCfg.ia ? wamCfg.ia : {}) };
     if (!Array.isArray(cfg.ia.labels)) cfg.ia.labels = [];
     if (cfg.ia.scope !== 'nuevos') cfg.ia.scope = 'etiquetas'; // ya no existe "todos": hay que elegir etiquetas o mensajes nuevos
-    cfg.ia.horas = Math.min(168, Math.max(1, Number(cfg.ia.horas) || 12));
+    { const h = Number(cfg.ia.horas); cfg.ia.horas = Number.isFinite(h) ? Math.min(720, Math.max(0, h)) : 72; }
+    if (cfg.ia.horas === 12 && !cfg.ia.horasEditada) cfg.ia.horas = 72; // el 12 era el valor inicial anterior, no una elección del usuario
     cfg.ia.labels = cfg.ia.labels.map(String);
     syncIa();
     syncFields();
