@@ -142,3 +142,12 @@ details label{display:flex;justify-content:space-between;align-items:center;marg
 .wam-iahuman{display:flex;gap:8px;padding:6px 10px;border-bottom:1px solid var(--line);font-size:13px;color:var(--text)}
 .wam-iahuman a{color:var(--err);cursor:pointer}
 #iaScope{max-width:none;width:100%}
+
+/* cabecera: letras centradas verticalmente; estado y licencia viven en "Acerca" */
+.wam-title{flex-direction:row;align-items:center}
+#wam-word{height:26px;width:auto;align-self:center;margin:0}
+.wam-aboutbtn{border:1px solid var(--line);background:var(--input);color:var(--text);border-radius:14px;padding:5px 12px;font:inherit;font-size:13px;cursor:pointer}
+#wam-aboutbox{position:absolute;top:62px;right:12px;z-index:6;width:290px;padding:12px 14px;border-radius:12px;background:var(--card);color:var(--text);box-shadow:0 6px 24px #0006;border:1px solid var(--line)}
+.wam-aboutrow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
+.wam-aboutrow>span:first-child{color:var(--sub)}
+#wam-aboutbox .wam-btn{margin-top:10px}

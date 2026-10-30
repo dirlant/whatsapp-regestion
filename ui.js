@@ -82,7 +82,14 @@
   root.id = 'wam-root';
   root.innerHTML = `
   <div id="wam-panel" hidden>
-    <div class="wam-head"><img id="wam-logo" alt=""><div class="wam-title" title="Envíos masivos"><img id="wam-word" alt="Beautychat"><div class="wam-stat"><span id="wam-conn">…</span><a id="wam-licstat" title="Cambiar licencia"></a></div></div><button id="wam-close" title="Cerrar">×</button></div>
+    <div class="wam-head"><img id="wam-logo" alt=""><div class="wam-title" title="Envíos masivos"><img id="wam-word" alt="Beautychat"></div><button id="wam-about" class="wam-aboutbtn" title="Estado y licencia">Acerca</button><button id="wam-close" title="Cerrar">×</button></div>
+    <div id="wam-aboutbox" hidden>
+      <div class="wam-aboutrow"><span>Conexión</span><span id="wam-conn">…</span></div>
+      <div class="wam-aboutrow"><span>Licencia</span><span id="wam-licstat"></span></div>
+      <div class="wam-aboutrow"><span>Número de WhatsApp</span><b id="wam-aboutnum">…</b></div>
+      <div class="wam-aboutrow"><span>Versión</span><b id="wam-aboutver"></b></div>
+      <button id="wam-changelic" class="wam-btn alt">Cambiar licencia</button>
+    </div>
 
     <div id="wam-gate">
       <div class="wam-card">
@@ -268,6 +275,9 @@
   $('#wam-biglogo').src = chrome.runtime.getURL('icons/logo.png');
   $('#wam-word').src = chrome.runtime.getURL('icons/wordmark.png');
   $('#wam-close').onclick = () => (panel.hidden = true);
+  $('#wam-aboutver').textContent = chrome.runtime.getManifest().version;
+  $('#wam-about').onclick = () => { const b = $('#wam-aboutbox'); b.hidden = !b.hidden; };
+  panel.addEventListener('click', (e) => { if (!e.target.closest('#wam-aboutbox, #wam-about')) $('#wam-aboutbox').hidden = true; });
   panel.querySelectorAll('.wam-tabbar button').forEach((b) => {
     b.onclick = () => {
       panel.querySelectorAll('.wam-tabbar button').forEach((x) => x.classList.toggle('on', x === b));
@@ -761,6 +771,7 @@
     st.textContent = !lic.token ? 'Sin licencia' : lic.checking ? 'Verificando…' : lic.valid ? 'Licencia hasta ' + lic.until : 'Licencia no válida';
     st.className = lic.valid ? 'ok' : 'bad';
     $('#wam-num').textContent = lic.number ? '+' + lic.number : 'no disponible aún';
+    $('#wam-aboutnum').textContent = lic.number ? '+' + lic.number : 'no disponible aún';
     if (!$('#wam-token').value) $('#wam-token').value = lic.token;
     $('#wam-gate-msg').textContent = lic.checking ? 'Verificando licencia…' : lic.reason || 'Ingresa el token de tu licencia.';
     $('#wam-gate-msg').className = 'wam-notice' + (lic.reason && !lic.checking ? ' bad' : '');
@@ -770,6 +781,7 @@
     $('#wam-start').disabled = !lic.valid;
   };
   $('#wam-licstat').onclick = () => { gateOpen = true; renderLic(); };
+  $('#wam-changelic').onclick = () => { $('#wam-aboutbox').hidden = true; gateOpen = true; renderLic(); };
   $('#wam-gate-close').onclick = () => { gateOpen = false; renderLic(); };
 
   const fetchLicense = (token, numero) =>
