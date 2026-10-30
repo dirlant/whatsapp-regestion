@@ -291,11 +291,13 @@
     </div>
 
     <div id="wam-foot-bulk" class="wam-foot">
+      <div id="wam-hint-bulk" class="wam-notice bad wam-span" hidden>La IA está en marcha: el envío masivo está bloqueado. Pausa la IA (pestaña IA) para usarlo. Solo puede funcionar una de las dos a la vez.</div>
       <button id="wam-start" class="wam-btn big">Iniciar envío</button>
       <button id="wam-pause" class="wam-btn alt">Pausar</button>
       <button id="wam-stop" class="wam-btn alt danger">Detener</button>
     </div>
     <div id="wam-foot-ia" class="wam-foot" hidden>
+      <div id="wam-hint-ia" class="wam-notice bad wam-span" hidden>Hay un envío masivo en curso: la IA no puede iniciarse hasta que termine o lo detengas. Solo puede funcionar una de las dos a la vez.</div>
       <button id="wam-iastart" class="wam-btn">Iniciar IA</button>
       <button id="wam-iapause" class="wam-btn alt" disabled>Pausar IA</button>
     </div>
@@ -813,7 +815,7 @@
     $('#wam-gate-detail').textContent = lic.detail || '';
     $('#wam-gate').hidden = lic.valid && !gateOpen;
     $('#wam-gate-close').hidden = !lic.valid;
-    $('#wam-start').disabled = !lic.valid;
+    $('#wam-start').disabled = !lic.valid || !!(cfg.ia && cfg.ia.on);
   };
   $('#wam-licstat').onclick = () => { gateOpen = true; renderLic(); };
   $('#wam-changelic').onclick = () => { $('#wam-aboutbox').hidden = true; gateOpen = true; renderLic(); };
@@ -1079,6 +1081,12 @@
   // opts = { queue, gen, onSent } -> reactivación con IA: cada mensaje lo genera gen(r) en vez de salir de una plantilla
   const start = async (resume = false, opts = null) => {
     if (run.state === 'running') return;
+    if (cfg.ia && cfg.ia.on) {
+      const msg = 'La IA está en marcha: pausa la IA (pestaña IA) para hacer un envío masivo. Solo puede funcionar una de las dos a la vez.';
+      log(msg, 'err');
+      setStats(msg);
+      return;
+    }
     if (!(await checkLicense())) { gateOpen = true; renderLic(); return log(lic.reason || 'Licencia no válida', 'err'); }
     const iaMode = !!(opts && opts.gen) || (resume === true && job && job.tipo === 'ia');
     if (iaMode && !opts) opts = iaReOpts(); // al reanudar una reactivación hay que volver a armar el generador
@@ -1120,6 +1128,7 @@
     }
     statsPrefix = '';
     let processed = 0;
+    renderIaRun(); // la IA queda bloqueada mientras dure el envío masivo
     persistJob(); renderResume();
     let nextPauseAt = rndInt(cfg.batchMin, cfg.batchMax);
     let sinceBreak = 0, consecErr = 0, lastLic = Date.now();
@@ -1203,6 +1212,7 @@
       if (i < queue.length - 1 && !(await wait(nextDelay(), 'Próximo en'))) break;
     }
     run.state = 'idle';
+    renderIaRun();
     const finished = processed >= queue.length;
     if (finished) job = null; // terminó todo: no queda nada pendiente
     else if (job) job.queue = queue.slice(processed);
@@ -1251,7 +1261,7 @@
     chrome.storage.local.set({ wamIa: { seen: iaSeen, sug: iaSug.slice(0, 50), human: iaHuman.slice(0, 50), count: iaCount, engaged: iaEngaged, sentT: iaSentT, pause: iaPause, reSent: iaReSent } });
   };
   const setIaStatus = (t) => { $('#wam-iastatus').textContent = t; };
-  const iaCanRun = () => !!(cfg.ia.on && lic.valid && cfg.ia.labels.length > 0);
+  const iaCanRun = () => !!(cfg.ia.on && lic.valid && cfg.ia.labels.length > 0 && run.state !== 'running');
   const iaLabelName = (id) => { const l = data.labels.find((x) => String(x.id) === String(id)); return l ? l.name : String(id); };
   const iaWarn = (t) => { const w = $('#wam-iawarn'); w.textContent = t || ''; w.hidden = !t; };
 
@@ -1290,10 +1300,17 @@
   };
 
   // ----- Iniciar / Pausar de la IA (independiente del envío masivo) -----
+  // Solo puede funcionar UNA de las dos cosas: la IA o un envío masivo (incluida la reactivación con IA).
   const renderIaRun = () => {
-    $('#wam-iastart').disabled = !!cfg.ia.on;
-    $('#wam-iastart').textContent = cfg.ia.on ? 'IA en marcha' : 'Iniciar IA';
-    $('#wam-iapause').disabled = !cfg.ia.on;
+    const on = !!cfg.ia.on;
+    const masivo = run.state === 'running';
+    $('#wam-iastart').disabled = on || masivo;
+    $('#wam-iastart').textContent = on ? 'IA en marcha' : 'Iniciar IA';
+    $('#wam-iapause').disabled = !on;
+    $('#wam-start').disabled = !lic.valid || on; // envío masivo bloqueado mientras la IA está en marcha
+    $('#wam-reiniciar').disabled = on || masivo;
+    $('#wam-hint-bulk').hidden = !on;
+    $('#wam-hint-ia').hidden = !masivo;
   };
 
   // ----- entrenamiento: lo escrito es un borrador hasta pulsar «Actualizar IA» -----
@@ -1608,6 +1625,7 @@
     onSent: (r) => { iaReSent[r.id] = Date.now(); iaPersist(); },
   });
   const iaReIniciar = async () => {
+    if (cfg.ia.on) return iaReStatus('La IA está en marcha: pausa la IA para hacer la reactivación. Solo puede funcionar una de las dos a la vez.');
     if (run.state === 'running') return iaReStatus('Ya hay un envío en curso. Espera a que termine o deténlo.');
     if (!cfg.ia.consent && !confirm('El texto de las conversaciones se enviará a un servicio de IA para escribir los mensajes. ¿Continuar?')) return;
     cfg.ia.consent = true; save();
@@ -1619,6 +1637,7 @@
   // ----- controles -----
   const iaStart = () => {
     if (cfg.ia.on) return;
+    if (run.state === 'running') { iaWarn('Hay un envío masivo en curso: espera a que termine o detenlo para iniciar la IA. Solo puede funcionar una de las dos a la vez.'); return; }
     if (!cfg.ia.labels.length) { iaWarn('Primero elige al menos una etiqueta que usará la IA.'); return; }
     if (cfg.ia.scope === 'palabras' && !iaKeywords().length) { iaWarn('Escribe al menos una palabra clave para activar la IA.'); return; }
     if (!lic.valid) { iaWarn('La licencia no está activa.'); return; }
