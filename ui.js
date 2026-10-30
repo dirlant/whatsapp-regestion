@@ -239,9 +239,9 @@
         </div>
         <p class="wam-hint" id="wam-iamodohint"></p>
         <div id="wam-iakwbox" hidden>
-          <div class="wam-hint"><b>Palabras claves para activar al asistente</b> (separadas por coma, o una por línea)</div>
-          <textarea id="iaKw" rows="3" maxlength="2000" placeholder="precio, cuánto cuesta, cita, información, promoción"></textarea>
-          <p class="wam-hint">Sin importar mayúsculas ni tildes, y por palabra completa. Desde que se activa en un chat, el asistente sigue la conversación aunque el cliente ya no use la palabra.</p>
+          <div class="wam-hint"><b>Palabras claves para activar al asistente</b></div>
+          <div id="wam-kwchips" class="wam-chips"><input id="iaKwInput" placeholder="Escribe una palabra y pulsa Enter" autocomplete="off" maxlength="60"></div>
+          <p class="wam-hint">Escribe una palabra o frase y pulsa <b>Enter</b> para agregarla; toca la × para quitarla. Sin importar mayúsculas ni tildes, y por palabra completa. Desde que se activa en un chat, el asistente sigue la conversación aunque el cliente ya no use la palabra.</p>
         </div>
         <p class="wam-hint">Al activarla busca los chats y, si falta tu respuesta (el último mensaje es del cliente), continúa la conversación, leído o no. Solo chats individuales (no grupos). Si una persona del equipo responde en un chat, la IA se aparta de ese chat 24 horas.</p>
 
@@ -1278,6 +1278,17 @@
 
   // ----- palabras clave: la IA se activa en un chat cuando el cliente escribe alguna -----
   const iaNorm = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  // lista de palabras claves tal como las escribió el usuario (sin repetidas, mínimo 2 letras); se guarda una por línea
+  const iaKwLista = () => {
+    const vistas = new Set();
+    return String(cfg.ia.palabras || '').split(/[\n,;]+/).map((x) => x.trim()).filter((x) => {
+      if (x.length < 2) return false;
+      const k = iaNorm(x);
+      if (vistas.has(k)) return false;
+      vistas.add(k);
+      return true;
+    });
+  };
   const iaKeywords = () => [...new Set(String(cfg.ia.palabras || '').split(/[\n,;]+/).map((x) => iaNorm(x).trim()).filter((x) => x.length >= 2))];
   const iaEsc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   // ¿lo pendiente del cliente (sus mensajes desde la última respuesta del negocio) contiene una palabra clave? Coincide por palabra completa.
@@ -1331,6 +1342,63 @@
     if (soloNuevos) return { scope: 'nuevos', limit: 60 };
     return { scope: 'palabras', limit: 120 }; // todos los chats individuales
   };
+  // ----- palabras claves como etiquetas: se escribe y con Enter se agrega; la × la quita -----
+  const renderIaKwChips = () => {
+    const cont = $('#wam-kwchips');
+    const input = $('#iaKwInput');
+    cont.querySelectorAll('.wam-chip').forEach((c) => c.remove());
+    iaKwLista().forEach((k, i) => {
+      const chip = document.createElement('span');
+      chip.className = 'wam-chip';
+      const t = document.createElement('span');
+      t.textContent = k;
+      const x = document.createElement('a');
+      x.textContent = '×';
+      x.title = 'Quitar';
+      x.onclick = () => iaKwQuitar(i);
+      chip.append(t, x);
+      cont.insertBefore(chip, input);
+    });
+  };
+  const iaKwCambio = () => { save(); renderIaKwChips(); if (cfg.ia.on && cfg.ia.modos.palabras) iaScan(true); };
+  // agrega una o varias palabras (separadas por coma, punto y coma o salto de línea); devuelve true si agregó alguna nueva
+  const iaKwAdd = (texto) => {
+    const nuevas = String(texto || '').split(/[\n,;]+/).map((x) => x.trim()).filter((x) => x.length >= 2);
+    if (!nuevas.length) return false;
+    const lista = iaKwLista();
+    const claves = new Set(lista.map(iaNorm));
+    let agregadas = 0;
+    nuevas.forEach((x) => { if (!claves.has(iaNorm(x))) { lista.push(x); claves.add(iaNorm(x)); agregadas++; } });
+    if (!agregadas) return false;
+    cfg.ia.palabras = lista.join('\n').slice(0, 2000);
+    iaKwCambio();
+    return true;
+  };
+  const iaKwQuitar = (i) => {
+    const lista = iaKwLista();
+    lista.splice(i, 1);
+    cfg.ia.palabras = lista.join('\n');
+    iaKwCambio();
+  };
+  {
+    const kwIn = $('#iaKwInput');
+    kwIn.onkeydown = (e) => {
+      if (e.key === 'Enter' || e.key === ',' || e.key === ';') {
+        e.preventDefault();
+        iaKwAdd(kwIn.value);
+        kwIn.value = '';
+      } else if (e.key === 'Backspace' && !kwIn.value) { // con el cuadro vacío, Borrar quita la última
+        const l = iaKwLista();
+        if (l.length) iaKwQuitar(l.length - 1);
+      }
+    };
+    kwIn.onblur = () => { if (kwIn.value.trim()) { iaKwAdd(kwIn.value); kwIn.value = ''; } }; // lo escrito no se pierde al salir del cuadro
+    kwIn.onpaste = (e) => {
+      const t = ((e.clipboardData || window.clipboardData) && (e.clipboardData || window.clipboardData).getData('text')) || '';
+      if (/[\n,;]/.test(t)) { e.preventDefault(); iaKwAdd(t); } // pegar "precio, cita, info" crea una etiqueta por palabra
+    };
+    $('#wam-kwchips').onclick = (e) => { if (!(e.target.closest && e.target.closest('.wam-chip'))) kwIn.focus(); };
+  }
   const iaSetModo = (clave, on) => {
     cfg.ia.modos[clave] = !!on;
     save();
@@ -1457,7 +1525,7 @@
     renderIaRun();
     $('#iaReDias').value = cfg.ia.reDias;
     renderIaReLabels();
-    $('#iaKw').value = cfg.ia.palabras;
+    renderIaKwChips();
     renderIaModos();
     $('#iaInstr').value = cfg.ia.instrucciones;
     renderIaTrain();
@@ -1726,8 +1794,6 @@
       if (cfg.ia.on) iaScan(true);
     };
   });
-  $('#iaKw').oninput = (e) => { cfg.ia.palabras = e.target.value.slice(0, 2000); save(); };
-  $('#iaKw').onchange = () => { if (cfg.ia.on && cfg.ia.modos.palabras) iaScan(true); };
   const iaHorarioCambio = () => { save(); renderIaHorario(); if (cfg.ia.on) iaScan(true); };
   $('#iaHorarioOn').onchange = (e) => { cfg.ia.horarioOn = e.target.checked; iaHorarioCambio(); };
   $('#iaInicio').onchange = (e) => { if (iaMin(e.target.value) !== null) cfg.ia.inicio = e.target.value; else e.target.value = cfg.ia.inicio; iaHorarioCambio(); };
