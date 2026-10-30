@@ -85,6 +85,7 @@
 
     <div id="wam-gate">
       <div class="wam-card">
+        <img id="wam-biglogo" alt="Beautychat">
         <b>Activar licencia</b>
         <input id="wam-token" placeholder="Token de licencia" autocomplete="off">
         <p class="wam-hint">Número de WhatsApp detectado: <b id="wam-num">…</b></p>
@@ -222,7 +223,8 @@
   document.documentElement.appendChild(root);
 
   const panel = $('#wam-panel');
-  $('#wam-logo').src = chrome.runtime.getURL('icons/icon48.png');
+  $('#wam-logo').src = chrome.runtime.getURL('icons/mark.png');
+  $('#wam-biglogo').src = chrome.runtime.getURL('icons/logo.png');
   $('#wam-close').onclick = () => (panel.hidden = true);
   panel.querySelectorAll('.wam-tabbar button').forEach((b) => {
     b.onclick = () => {

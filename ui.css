@@ -129,3 +129,5 @@ details label{display:flex;justify-content:space-between;align-items:center;marg
 .wam-st.new{color:var(--green)}
 .wam-st.read{color:var(--sub)}
 .wam-aviso:not(.read){box-shadow:0 0 0 1px var(--green) inset}
+
+#wam-biglogo{display:block;width:140px;margin:4px auto 8px;padding:8px;border-radius:16px;background:#fff}
