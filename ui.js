@@ -238,15 +238,19 @@
           <label class="wam-sw"><span>Solo no leídos<small>Limita lo anterior a los chats con mensajes sin leer.</small></span><input type="checkbox" data-modo="noLeidos"><i></i></label>
         </div>
         <p class="wam-hint" id="wam-iamodohint"></p>
-        <div id="wam-iakwbox" hidden>
+        <div id="wam-iakwbox">
           <div class="wam-hint"><b>Palabras claves para activar al asistente</b></div>
           <div id="wam-kwchips" class="wam-chips"><input id="iaKwInput" placeholder="Escribe una palabra y pulsa Enter" autocomplete="off" maxlength="60"></div>
+          <p class="wam-hint" id="wam-iakw-nota" hidden>Bloqueado: activa la modalidad «Por palabras claves» para usar palabras claves.</p>
           <p class="wam-hint">Escribe una palabra o frase y pulsa <b>Enter</b> para agregarla; toca la × para quitarla. No distingue mayúsculas, minúsculas ni tildes («PRECIO», «Precio» y «precio» son lo mismo), y detecta la palabra aunque lleve más letras al final: «precio» también encuentra «precios». Desde que se activa en un chat, el asistente sigue la conversación aunque el cliente ya no use la palabra.</p>
         </div>
         <p class="wam-hint">Al activarla busca los chats y, si falta tu respuesta (el último mensaje es del cliente), continúa la conversación, leído o no. Solo chats individuales (no grupos). Si una persona del equipo responde en un chat, la IA se aparta de ese chat 24 horas.</p>
 
-        <div class="wam-hint"><b>Etiquetas que usará la IA</b> (elige al menos una)</div>
-        <div id="wam-ialabels" class="wam-list"></div>
+        <div id="wam-ialabels-box">
+          <div class="wam-hint"><b>Etiquetas que usará la IA</b> (elige al menos una)</div>
+          <div id="wam-ialabels" class="wam-list"></div>
+          <p class="wam-hint" id="wam-ialabels-nota" hidden>Bloqueado: activa la modalidad «Por etiquetas» para usar etiquetas.</p>
+        </div>
 
         <div class="wam-hint" style="margin-top:10px"><b>Entrenamiento de la IA</b></div>
         <textarea id="iaInstr" rows="6" maxlength="3000" placeholder="Qué vendes o qué servicio das, tono, precios, horarios, qué NO debe hacer… La IA solo usa esta información; si no está aquí, pasa el chat a una persona."></textarea>
@@ -1267,7 +1271,9 @@
     chrome.storage.local.set({ wamIa: { seen: iaSeen, sug: iaSug.slice(0, 50), human: iaHuman.slice(0, 50), count: iaCount, engaged: iaEngaged, sentT: iaSentT, pause: iaPause, reSent: iaReSent } });
   };
   const setIaStatus = (t) => { $('#wam-iastatus').textContent = t; };
-  const iaCanRun = () => !!(cfg.ia.on && lic.valid && cfg.ia.labels.length > 0 && run.state !== 'running');
+  const iaCanRun = () => !!(cfg.ia.on && lic.valid && (!cfg.ia.modos.etiquetas || cfg.ia.labels.length > 0) && run.state !== 'running');
+  // etiquetas con las que la IA clasifica y etiqueta chats: solo si la modalidad «Por etiquetas» está activa
+  const iaEtiquetasClasif = () => (cfg.ia.modos.etiquetas ? cfg.ia.labels : []);
   const iaLabelName = (id) => { const l = data.labels.find((x) => String(x.id) === String(id)); return l ? l.name : String(id); };
   const iaWarn = (t) => { const w = $('#wam-iawarn'); w.textContent = t || ''; w.hidden = !t; };
 
@@ -1308,7 +1314,13 @@
   const renderIaModos = () => {
     const m = cfg.ia.modos;
     panel.querySelectorAll('#wam-iamodos input[data-modo]').forEach((i) => { i.checked = !!m[i.dataset.modo]; });
-    $('#wam-iakwbox').hidden = !m.palabras;
+    // cada módulo solo funciona si su modalidad está activa: si no, queda bloqueado (y la IA no lo usa)
+    $('#wam-iakwbox').className = m.palabras ? '' : 'wam-bloqueado';
+    $('#iaKwInput').disabled = !m.palabras;
+    $('#wam-iakw-nota').hidden = !!m.palabras;
+    $('#wam-ialabels-box').className = m.etiquetas ? '' : 'wam-bloqueado';
+    $('#wam-ialabels-nota').hidden = !!m.etiquetas;
+    renderIaLabels();
     const nombres = { etiquetas: 'con las etiquetas elegidas', palabras: 'cuando un mensaje entrante tenga una palabra clave', todos: 'todos los chats individuales', nuevos: 'las conversaciones nuevas' };
     const que = MODOS_QUE.filter((k) => m[k]);
     let t;
@@ -1454,10 +1466,11 @@
       const i = document.createElement('input');
       i.type = 'checkbox';
       i.checked = cfg.ia.labels.includes(String(lb.id));
+      i.disabled = !cfg.ia.modos.etiquetas; // bloqueadas mientras «Por etiquetas» esté apagada
       i.onchange = () => {
         const id = String(lb.id);
         cfg.ia.labels = i.checked ? [...new Set([...cfg.ia.labels, id])] : cfg.ia.labels.filter((x) => x !== id);
-        if (!cfg.ia.labels.length && cfg.ia.on) { cfg.ia.on = false; renderIaRun(); iaWarn('La IA se pausó: tiene que haber al menos una etiqueta.'); }
+        if (cfg.ia.modos.etiquetas && !cfg.ia.labels.length && cfg.ia.on) { cfg.ia.on = false; renderIaRun(); iaWarn('La IA se pausó: tiene que haber al menos una etiqueta.'); }
         save();
         if (cfg.ia.on) iaScan(true);
       };
@@ -1539,7 +1552,7 @@
 
   // ----- acciones -----
   const iaApplyLabel = async (chatId, labelId, chatLabels) => {
-    if (!labelId) return;
+    if (!labelId || !cfg.ia.modos.etiquetas) return; // con «Por etiquetas» apagada no se toca ninguna etiqueta
     const remove = cfg.ia.labels.filter((id) => id !== String(labelId) && (chatLabels || []).includes(id));
     try { await call('iaSetLabel', { chatId, add: String(labelId), remove }); } catch (e) { log('No se pudo etiquetar: ' + e.message, 'err'); }
   };
@@ -1572,7 +1585,7 @@
       payload: {
         token: lic.token, numero: lic.number, contacto: c.name, mensajes,
         es_nuevo: !!c.nuevo,
-        etiquetas: cfg.ia.labels.map((id) => ({ id, nombre: iaLabelName(id) })),
+        etiquetas: iaEtiquetasClasif().map((id) => ({ id, nombre: iaLabelName(id) })),
         instrucciones: cfg.ia.instrAplicadas, // solo el entrenamiento ya aplicado con «Actualizar IA»
       },
     }, (x) => resolve(x || { error: (chrome.runtime.lastError && chrome.runtime.lastError.message) || 'sin respuesta' }));
@@ -1730,7 +1743,7 @@
       type: 'wam-ia',
       payload: {
         token: lic.token, numero: lic.number, modo: 'reactivar', contacto: r.name, mensajes,
-        etiquetas: cfg.ia.labels.map((id) => ({ id, nombre: iaLabelName(id) })),
+        etiquetas: iaEtiquetasClasif().map((id) => ({ id, nombre: iaLabelName(id) })),
         instrucciones: cfg.ia.instrAplicadas,
       },
     }, (x) => resolve(x || { error: (chrome.runtime.lastError && chrome.runtime.lastError.message) || 'sin respuesta' })));
@@ -1761,7 +1774,7 @@
     if (cfg.ia.on) return;
     if (run.state === 'running') { iaWarn('Hay un envío masivo en curso: espera a que termine o detenlo para iniciar la IA. Solo puede funcionar una de las dos a la vez.'); return; }
     if (!iaModosActivos().length) { iaWarn('Activa al menos una modalidad (por etiquetas, palabras claves, todos los chats…).'); return; }
-    if (!cfg.ia.labels.length) { iaWarn('Primero elige al menos una etiqueta que usará la IA.'); return; }
+    if (cfg.ia.modos.etiquetas && !cfg.ia.labels.length) { iaWarn('La modalidad «Por etiquetas» está activa: elige al menos una etiqueta (o apaga la modalidad).'); return; }
     if (cfg.ia.modos.palabras && !iaKeywords().length) { iaWarn('Escribe al menos una palabra clave (o apaga la modalidad «Por palabras claves»).'); return; }
     if (cfg.ia.modos.todos && cfg.ia.mode === 'auto' && !confirm('Con «Para todos los chats» el asistente responderá solo a TODAS las conversaciones individuales con respuesta pendiente, incluso antiguas. Conviene probar antes en modo Sugerencia. ¿Iniciarlo igual?')) return;
     if (!lic.valid) { iaWarn('La licencia no está activa.'); return; }

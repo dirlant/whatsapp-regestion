@@ -173,3 +173,6 @@ details label{display:flex;justify-content:space-between;align-items:center;marg
 .wam-chip a{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#0003;color:#fff;cursor:pointer;font-size:14px;line-height:1}
 .wam-chip a:hover{background:#0006}
 #wam-panel .wam-chips input#iaKwInput{flex:1;min-width:150px;width:auto;display:inline-block;padding:4px 2px;background:none;border:0;outline:none}
+
+.wam-bloqueado{opacity:.4;pointer-events:none;filter:grayscale(.7);user-select:none}
+.wam-bloqueado input{cursor:not-allowed}
