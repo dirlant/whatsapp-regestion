@@ -62,7 +62,7 @@
     hourTo: 20,
     source: 'label',
     cc: '',
-    ia: { on: false, mode: 'sugerencia', scope: 'etiquetas', labels: [], instrucciones: '', maxDia: 100, horas: 0, instrAplicadas: '', horarioOn: true, inicio: '08:00', cierre: '20:00', palabras: '', reLabels: [], reDias: 3, reObjetivo: '', consent: false },
+    ia: { on: false, mode: 'sugerencia', scope: 'etiquetas', labels: [], instrucciones: '', maxDia: 100, horas: 0, instrAplicadas: '', horarioOn: true, inicio: '08:00', cierre: '20:00', palabras: '', reLabels: [], reDias: 3, kwExtra: false, consent: false },
     messages: [...EXAMPLE_MSGS],
   };
   let cfg = { ...DEFAULTS };
@@ -235,11 +235,10 @@
           <option value="nuevos">Mensajes nuevos: conversaciones nuevas (leídos o no)</option>
           <option value="palabras">Palabras clave: cuando el cliente escriba alguna</option>
         </select>
-        <div id="wam-iakwbox" hidden>
-          <div class="wam-hint"><b>Palabras clave</b> (separadas por coma, o una por línea)</div>
-          <textarea id="iaKw" rows="3" maxlength="2000" placeholder="precio, cuánto cuesta, cita, información, promoción"></textarea>
-          <p class="wam-hint">La IA se activa en un chat cuando el mensaje pendiente del cliente contiene alguna de estas palabras (sin importar mayúsculas ni tildes). Desde ese momento sigue la conversación aunque ya no use la palabra. Sirve para cualquier chat individual, tenga o no etiqueta.</p>
-        </div>
+        <div class="wam-hint" style="margin-top:10px"><b>Palabras clave en mensajes entrantes</b> (separadas por coma, o una por línea)</div>
+        <textarea id="iaKw" rows="3" maxlength="2000" placeholder="precio, cuánto cuesta, cita, información, promoción"></textarea>
+        <label class="wam-sw" id="wam-iakwextra-row"><span>También responder en cualquier chat cuando un mensaje entrante tenga una palabra clave</span><input type="checkbox" id="iaKwExtra"><i></i></label>
+        <p class="wam-hint" id="wam-iakwhint"></p>
         <p class="wam-hint">Al activarla busca los chats y, si falta tu respuesta (el último mensaje es del cliente), continúa la conversación, leído o no. Solo chats individuales (no grupos). Si una persona del equipo responde en un chat, la IA se aparta de ese chat 24 horas.</p>
 
         <div class="wam-hint"><b>Etiquetas que usará la IA</b> (elige al menos una)</div>
@@ -264,8 +263,6 @@
         <div class="wam-hint"><b>Etiquetas a reactivar</b></div>
         <div id="wam-relabels" class="wam-list"></div>
         <label>Sin respuesta desde hace al menos (días) <span><input type="number" id="iaReDias" min="0" max="3650"></span></label>
-        <div class="wam-hint"><b>Objetivo del mensaje</b> (opcional)</div>
-        <textarea id="iaReObj" rows="2" maxlength="300" placeholder="Ej.: retomar la conversación y ofrecer agendar una cita esta semana"></textarea>
         <button id="wam-rebuscar" class="wam-btn alt">Buscar conversaciones</button>
         <div id="wam-restatus" class="wam-hint">Aún no se buscó.</div>
         <div class="wam-row">
@@ -1288,7 +1285,18 @@
     const t = ' ' + iaNorm(txt.join(' \n ')) + ' ';
     return kws.some((k) => new RegExp('(^|[^a-z0-9])' + iaEsc(k) + '([^a-z0-9]|$)').test(t));
   };
-  const renderIaKw = () => { $('#wam-iakwbox').hidden = cfg.ia.scope !== 'palabras'; };
+  // Las palabras clave se comparan con el mensaje pendiente del cliente (sin mayúsculas ni tildes, por palabra completa).
+  const renderIaKw = () => {
+    const soloPalabras = cfg.ia.scope === 'palabras';
+    $('#wam-iakwextra-row').hidden = soloPalabras; // en ese alcance las palabras clave ya son la única forma de activarse
+    $('#iaKwExtra').checked = !!cfg.ia.kwExtra;
+    $('#wam-iakwhint').textContent = soloPalabras
+      ? 'La IA solo se activa en un chat cuando el mensaje entrante del cliente contiene alguna de estas palabras; desde ahí sigue la conversación aunque ya no las use. Sirve para cualquier chat individual, tenga o no etiqueta.'
+      : cfg.ia.kwExtra
+        ? 'Además de los chats del alcance elegido, la IA se activa en CUALQUIER chat individual cuando un mensaje entrante contiene alguna de estas palabras.'
+        : 'Opcional: activa el interruptor para que la IA también se active, en cualquier chat, cuando un mensaje entrante contenga una de estas palabras.';
+  };
+  const iaKwEnUso = () => cfg.ia.scope === 'palabras' || !!cfg.ia.kwExtra; // ¿las palabras clave participan en la activación?
 
   // ----- horario de trabajo de la IA: hora de inicio y hora de cierre -----
   const iaMin = (hhmm) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || '')); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
@@ -1406,7 +1414,6 @@
   const syncIa = () => {
     renderIaRun();
     $('#iaReDias').value = cfg.ia.reDias;
-    $('#iaReObj').value = cfg.ia.reObjetivo;
     renderIaReLabels();
     $('#iaScope').value = cfg.ia.scope;
     $('#iaKw').value = cfg.ia.palabras;
@@ -1477,7 +1484,9 @@
       const st = await call('status');
       if (!st.ready) { setTimeout(() => iaScan(false), 5000); return setIaStatus('Esperando a que WhatsApp termine de cargar…'); }
       setIaStatus('Revisando chats…');
-      const cands = await call('iaCandidates', { scope: cfg.ia.scope, labelIds: cfg.ia.labels, limit: 60, maxAgeSec: full ? cfg.ia.horas * 3600 : 0, incluir: Object.keys(iaEngaged), solo: onlyIds || undefined });
+      // con el interruptor de palabras clave se piden TODOS los chats individuales y el alcance se evalúa acá
+      const amplio = !!cfg.ia.kwExtra && cfg.ia.scope !== 'palabras';
+      const cands = await call('iaCandidates', { scope: amplio ? 'palabras' : cfg.ia.scope, labelIds: cfg.ia.labels, limit: amplio ? 120 : 60, maxAgeSec: full ? cfg.ia.horas * 3600 : 0, incluir: Object.keys(iaEngaged), solo: onlyIds || undefined });
       let asked = 0;
       let nuevas = 0;
       let aviso = ''; // problema de esta revisión: se muestra en lugar del resumen
@@ -1497,7 +1506,13 @@
         if (!last || last.de !== 'cliente') continue; // ya respondió el negocio
         if (cfg.ia.horas > 0 && Date.now() / 1000 - last.t > cfg.ia.horas * 3600) continue; // mensaje demasiado viejo (0 = sin límite)
         if ((iaSeen[c.id] || 0) >= last.t) continue; // ya atendido
-        if (cfg.ia.scope === 'palabras' && !iaEngaged[c.id] && !iaMatchKw(c)) continue; // se activa solo si el cliente usó una palabra clave
+        if (!iaEngaged[c.id]) { // los chats que la IA ya viene atendiendo continúan sin necesitar la palabra
+          if (cfg.ia.scope === 'palabras') { if (!iaMatchKw(c)) continue; }
+          else if (amplio) {
+            const enAlcance = cfg.ia.scope === 'etiquetas' ? c.labels.some((l) => cfg.ia.labels.includes(l)) : !!c.nuevo;
+            if (!enAlcance && !iaMatchKw(c)) continue; // ni está en el alcance ni usó una palabra clave
+          }
+        }
         if (asked >= IA_MAX_PER_SCAN) { hayMas = true; break; } // el resto sigue en la próxima revisión (que arranca enseguida)
         if (!last.texto || last.tipo !== 'chat') {
           iaAddHuman(c, 'El último mensaje no es de texto (foto, audio, sticker…)', last.t);
@@ -1612,7 +1627,7 @@
     const resp = await new Promise((resolve) => chrome.runtime.sendMessage({
       type: 'wam-ia',
       payload: {
-        token: lic.token, numero: lic.number, modo: 'reactivar', objetivo: cfg.ia.reObjetivo, contacto: r.name, mensajes,
+        token: lic.token, numero: lic.number, modo: 'reactivar', contacto: r.name, mensajes,
         etiquetas: cfg.ia.labels.map((id) => ({ id, nombre: iaLabelName(id) })),
         instrucciones: cfg.ia.instrAplicadas,
       },
@@ -1644,7 +1659,7 @@
     if (cfg.ia.on) return;
     if (run.state === 'running') { iaWarn('Hay un envío masivo en curso: espera a que termine o detenlo para iniciar la IA. Solo puede funcionar una de las dos a la vez.'); return; }
     if (!cfg.ia.labels.length) { iaWarn('Primero elige al menos una etiqueta que usará la IA.'); return; }
-    if (cfg.ia.scope === 'palabras' && !iaKeywords().length) { iaWarn('Escribe al menos una palabra clave para activar la IA.'); return; }
+    if (iaKwEnUso() && !iaKeywords().length) { iaWarn('Escribe al menos una palabra clave (o apaga el interruptor de palabras clave).'); return; }
     if (!lic.valid) { iaWarn('La licencia no está activa.'); return; }
     if (!cfg.ia.consent && !confirm('Las conversaciones con respuesta pendiente se enviarán a un servicio de IA para generar las respuestas. ¿Continuar?')) return;
     if (cfg.ia.mode === 'auto' && !confirm('En modo automático la IA responderá sola a tus clientes. ¿Iniciarla?')) return;
@@ -1677,13 +1692,13 @@
   });
   $('#iaScope').onchange = (e) => { cfg.ia.scope = e.target.value; save(); renderIaKw(); if (cfg.ia.on) iaScan(true); };
   $('#iaKw').oninput = (e) => { cfg.ia.palabras = e.target.value.slice(0, 2000); save(); };
-  $('#iaKw').onchange = () => { if (cfg.ia.on && cfg.ia.scope === 'palabras') iaScan(true); };
+  $('#iaKw').onchange = () => { if (cfg.ia.on && iaKwEnUso()) iaScan(true); };
+  $('#iaKwExtra').onchange = (e) => { cfg.ia.kwExtra = e.target.checked; save(); renderIaKw(); if (cfg.ia.on) iaScan(true); };
   const iaHorarioCambio = () => { save(); renderIaHorario(); if (cfg.ia.on) iaScan(true); };
   $('#iaHorarioOn').onchange = (e) => { cfg.ia.horarioOn = e.target.checked; iaHorarioCambio(); };
   $('#iaInicio').onchange = (e) => { if (iaMin(e.target.value) !== null) cfg.ia.inicio = e.target.value; else e.target.value = cfg.ia.inicio; iaHorarioCambio(); };
   $('#iaCierre').onchange = (e) => { if (iaMin(e.target.value) !== null) cfg.ia.cierre = e.target.value; else e.target.value = cfg.ia.cierre; iaHorarioCambio(); };
   $('#iaReDias').onchange = (e) => { const v = Number(e.target.value); cfg.ia.reDias = e.target.value !== '' && Number.isFinite(v) ? Math.min(3650, Math.max(0, Math.round(v))) : 3; e.target.value = cfg.ia.reDias; iaRe = []; save(); };
-  $('#iaReObj').oninput = (e) => { cfg.ia.reObjetivo = e.target.value.slice(0, 300); save(); };
   $('#wam-rebuscar').onclick = () => iaReBuscar();
   $('#wam-reiniciar').onclick = () => iaReIniciar();
   $('#wam-repausa').onclick = () => bulkPause();
