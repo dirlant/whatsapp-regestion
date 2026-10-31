@@ -1212,6 +1212,7 @@
   let iaPausedDay = 0; // día en que el servidor avisó que se alcanzó el tope de consultas
   let iaEngaged = {}; // chatId -> true: conversaciones que la IA viene atendiendo (se continúan aunque ya no sean "nuevas")
   let iaSentT = {}; // chatId -> hora (segundos) del último mensaje enviado por la IA
+  let iaPasosT = {}; // 'palabra|chatId' -> cuándo (ms) se le enviaron los pasos de esa palabra (para no repetirlos enseguida)
   let iaPause = {}; // chatId -> hasta cuándo (ms) la IA se aparta porque una persona respondió
   const IA_PAUSE_MS = 24 * 3600 * 1000;
   let iaAgain = false; // llegó algo mientras se revisaba: se vuelve a revisar al terminar
@@ -1224,10 +1225,21 @@
     if (keys.length > 500) keys.slice(0, keys.length - 500).forEach((k) => delete iaSeen[k]);
     [iaEngaged, iaSentT].forEach((o) => { const k = Object.keys(o); if (k.length > 500) k.slice(0, k.length - 500).forEach((x) => delete o[x]); });
     Object.keys(iaPause).forEach((k) => { if (iaPause[k] < Date.now()) delete iaPause[k]; });
-    chrome.storage.local.set({ wamIa: { seen: iaSeen, sug: iaSug.slice(0, 50), human: iaHuman.slice(0, 50), count: iaCount, engaged: iaEngaged, sentT: iaSentT, pause: iaPause } });
+    chrome.storage.local.set({ wamIa: { seen: iaSeen, sug: iaSug.slice(0, 50), human: iaHuman.slice(0, 50), count: iaCount, engaged: iaEngaged, sentT: iaSentT, pause: iaPause, pasosT: iaPasosT } });
   };
   const setIaStatus = (t) => { $('#wam-iastatus').textContent = t; };
-  const iaCanRun = () => !!(cfg.ia.on && lic.valid && (!cfg.ia.modos.etiquetas || cfg.ia.labels.length > 0) && run.state !== 'running');
+  // mientras se edita la configuración de la IA (pasos, palabras, entrenamiento, etiquetas…) la IA se detiene sola y retoma unos segundos después del último cambio
+  const IA_HOLD_MS = 8000;
+  let iaHoldUntil = 0, iaHoldTimer = null;
+  const iaEditando = () => Date.now() < iaHoldUntil;
+  const iaHold = () => {
+    if (!cfg.ia.on) return;
+    iaHoldUntil = Date.now() + IA_HOLD_MS;
+    setIaStatus('IA en pausa mientras editas. Retoma sola unos segundos después de tu último cambio.');
+    clearTimeout(iaHoldTimer);
+    iaHoldTimer = setTimeout(() => { iaHoldUntil = 0; if (cfg.ia.on) { setIaStatus('IA retomando…'); iaScan(true); } }, IA_HOLD_MS + 100);
+  };
+  const iaCanRun = () => !!(cfg.ia.on && !iaEditando() && lic.valid && (!cfg.ia.modos.etiquetas || cfg.ia.labels.length > 0) && run.state !== 'running');
   // etiquetas con las que la IA clasifica y etiqueta chats: solo si la modalidad «Por etiquetas» está activa
   const iaEtiquetasClasif = () => (cfg.ia.modos.etiquetas ? cfg.ia.labels : []);
   const iaLabelName = (id) => { const l = data.labels.find((x) => String(x.id) === String(id)); return l ? l.name : String(id); };
@@ -1506,6 +1518,7 @@
       const po = cfg.ia.pasos[iaNorm(quitada)];
       if (po && po.textos) po.textos.forEach(iaImgBorrarPaso); // sus imágenes guardadas también se borran
       delete cfg.ia.pasos[iaNorm(quitada)];
+      Object.keys(iaPasosT).forEach((k) => { if (k.startsWith(iaNorm(quitada) + '|')) delete iaPasosT[k]; });
       if (iaKwSel === iaNorm(quitada)) iaKwSel = '';
     }
     cfg.ia.palabras = lista.join('\n');
@@ -1534,6 +1547,7 @@
     if (!iaKwSel) return;
     const p = iaPasosObj(iaKwSel);
     p.on = e.target.checked;
+    Object.keys(iaPasosT).forEach((k) => { if (k.startsWith(iaKwSel + '|')) delete iaPasosT[k]; }); // al apagar/encender los pasos se olvida a quién ya se enviaron (sirve para volver a probar)
     if (p.on && !iaPasosDe(iaKwSel)) { p.textos.forEach(iaImgBorrarPaso); p.textos = pasosDefecto(); } // al activarlos por primera vez (sin pasos completos) se cargan los pasos por defecto
     save(); renderIaKwChips();
   };
@@ -1720,12 +1734,10 @@
   };
   // Envía los pasos de una palabra clave en orden (con pausas cortas) y deja el chat "en atención" de la IA:
   // cuando el cliente responda, la IA continúa la conversación con los pasos ya en el historial.
-  // un chat que la IA ya atendía pero donde el negocio no escribe hace más de 12 h cuenta como conversación nueva: si el cliente vuelve con una palabra clave, se repiten los pasos
-  const IA_SESION_MS = 12 * 3600 * 1000;
-  const iaSesionNueva = (c) => {
-    const yo = c.msgs.filter((m) => m.de === 'yo');
-    return !yo.length || Date.now() - yo[yo.length - 1].t * 1000 > IA_SESION_MS;
-  };
+  // los pasos de una palabra se envían a un chat una vez cada 12 h (aunque la IA ya lo estuviera atendiendo)
+  const IA_PASOS_MS = 12 * 3600 * 1000;
+  const iaPasosKey = (kw, chatId) => iaNorm(kw) + '|' + chatId;
+  const iaPasosRecientes = (kw, chatId) => Date.now() - (iaPasosT[iaPasosKey(kw, chatId)] || 0) < IA_PASOS_MS;
   const iaEnviarPasos = async (chat, kw, pasos) => {
     const vars = (t) => String(t || '').replace(/\{nombre\}/gi, chat.name || '').replace(/\{palabra\}/gi, kw).replace(/ +([,!.?])/g, '$1').replace(/[ \t]{2,}/g, ' ').trim();
     let enviados = 0;
@@ -1795,7 +1807,7 @@
   const iaScan = async (manual = false, onlyIds = null) => {
     const full = !onlyIds;
     if (full && iaBusy) { iaAgain = true; return; } // se repite apenas termine la revisión completa en curso
-    if (!iaCanRun()) { if (manual) setIaStatus('Activa la IA y elige al menos una etiqueta.'); return; }
+    if (!iaCanRun()) { if (manual && !iaEditando()) setIaStatus('Activa la IA y elige al menos una etiqueta.'); return; }
     const auto = true;
     if (iaPausedDay === iaDay()) return setIaStatus('Se alcanzó el tope diario de consultas de IA. Continúa mañana.');
     if (auto && iaHorarioActivo() && !iaEnHorario()) return setIaStatus('Fuera del horario de trabajo (' + cfg.ia.inicio + '–' + cfg.ia.cierre + '). La IA retoma a las ' + cfg.ia.inicio + '.');
@@ -1827,13 +1839,13 @@
         if (cfg.ia.horas > 0 && Date.now() / 1000 - last.t > cfg.ia.horas * 3600) continue; // mensaje demasiado viejo (0 = sin límite)
         if ((iaSeen[c.id] || 0) >= last.t) continue; // ya atendido
         if (!iaCalifica(c)) continue; // no entra en ninguna modalidad activa
-        if (iaEngaged[c.id] && cfg.ia.modos.palabras && !iaSesionNueva(c) && iaKwMatch(c)) log('«' + c.name + '» ya estaba en atención de la IA: no se repiten los pasos, responde la IA');
         // palabra clave con pasos por defecto: se envían apenas llega la palabra; la IA continúa cuando el cliente responda
-        if (cfg.ia.modos.palabras && (!iaEngaged[c.id] || iaSesionNueva(c))) {
+        if (cfg.ia.modos.palabras) {
           const kw = iaKwMatch(c);
           const paso = kw ? iaPasosDe(kw) : null;
           if (kw && !paso) log('Palabra «' + kw + '» detectada en ' + c.name + ', pero no tiene pasos activos: responde la IA directamente');
-          if (paso) {
+          if (paso && iaPasosRecientes(kw, c.id)) log('Palabra «' + kw + '» en ' + c.name + ': sus pasos ya se enviaron hace menos de 12 h, responde la IA');
+          else if (paso) {
             iaSeen[c.id] = last.t;
             if (!auto) {
               iaSug = iaSug.filter((x) => x.chatId !== c.id);
@@ -1841,7 +1853,7 @@
               nuevas++;
             } else {
               iaInFlight.add(c.id);
-              try { await iaEnviarPasos({ id: c.id, name: c.name, labels: c.labels }, kw, paso.pasos); } finally { iaInFlight.delete(c.id); }
+              try { if (await iaEnviarPasos({ id: c.id, name: c.name, labels: c.labels }, kw, paso.pasos)) { iaPasosT[iaPasosKey(kw, c.id)] = Date.now(); iaPersist(); } } finally { iaInFlight.delete(c.id); }
             }
             continue;
           }
@@ -1940,6 +1952,12 @@
   $('#iaHorarioOn').onchange = (e) => { cfg.ia.horarioOn = e.target.checked; iaHorarioCambio(); };
   $('#iaInicio').onchange = (e) => { if (iaMin(e.target.value) !== null) cfg.ia.inicio = e.target.value; else e.target.value = cfg.ia.inicio; iaHorarioCambio(); };
   $('#iaCierre').onchange = (e) => { if (iaMin(e.target.value) !== null) cfg.ia.cierre = e.target.value; else e.target.value = cfg.ia.cierre; iaHorarioCambio(); };
+  // cualquier cambio en la configuración de la IA la pone en pausa un momento (el botón Pausar IA no cambia: sigue siendo la pausa manual)
+  ['input', 'change', 'click'].forEach((ev) => panel.querySelector('[data-body="ia"]').addEventListener(ev, (e) => {
+    if (ev === 'click' && !e.target.closest('#wam-iakwbox, #wam-iamodos, #wam-ialabels-box, #wam-iaupdate, .wam-seg')) return;
+    if (e.target.closest('#wam-ianow')) return;
+    iaHold();
+  }, true));
   $('#iaInstr').oninput = (e) => { cfg.ia.instrucciones = e.target.value.slice(0, 3000); save(); renderIaTrain(); };
   $('#wam-iaupdate').onclick = () => {
     if (!iaTrainDirty()) return;
@@ -1973,7 +1991,7 @@
     if (!wamIa) return;
     iaSeen = wamIa.seen || {}; iaSug = []; iaHuman = Array.isArray(wamIa.human) ? wamIa.human : [];
     iaCount = wamIa.count || iaCount;
-    iaEngaged = wamIa.engaged || {}; iaSentT = wamIa.sentT || {}; iaPause = wamIa.pause || {};
+    iaEngaged = wamIa.engaged || {}; iaSentT = wamIa.sentT || {}; iaPause = wamIa.pause || {}; iaPasosT = wamIa.pasosT || {};
     renderIaSug(); renderIaHuman();
   });
   chrome.storage.local.get('wamLog').then(({ wamLog }) => { if (Array.isArray(wamLog)) sendLog = wamLog; renderMetrics(); });
