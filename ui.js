@@ -1487,7 +1487,12 @@
     const lista = iaKwLista();
     const claves = new Set(lista.map(iaNorm));
     let agregadas = 0;
-    nuevas.forEach((x) => { if (!claves.has(iaNorm(x))) { lista.push(x); claves.add(iaNorm(x)); agregadas++; } });
+    nuevas.forEach((x) => {
+      if (claves.has(iaNorm(x))) return;
+      lista.push(x); claves.add(iaNorm(x)); agregadas++;
+      const p = iaPasosObj(iaNorm(x));
+      if (!p.on && !iaPasosDe(x)) { p.on = true; p.textos = pasosDefecto(); } // una palabra nueva nace con los pasos activados: primero se envían y luego responde la IA
+    });
     if (!agregadas) return false;
     cfg.ia.palabras = lista.join('\n').slice(0, 2000);
     iaKwSel = iaNorm(nuevas[nuevas.length - 1]); // se abre su panel de pasos para configurarlos enseguida
@@ -1715,6 +1720,12 @@
   };
   // Envía los pasos de una palabra clave en orden (con pausas cortas) y deja el chat "en atención" de la IA:
   // cuando el cliente responda, la IA continúa la conversación con los pasos ya en el historial.
+  // un chat que la IA ya atendía pero donde el negocio no escribe hace más de 12 h cuenta como conversación nueva: si el cliente vuelve con una palabra clave, se repiten los pasos
+  const IA_SESION_MS = 12 * 3600 * 1000;
+  const iaSesionNueva = (c) => {
+    const yo = c.msgs.filter((m) => m.de === 'yo');
+    return !yo.length || Date.now() - yo[yo.length - 1].t * 1000 > IA_SESION_MS;
+  };
   const iaEnviarPasos = async (chat, kw, pasos) => {
     const vars = (t) => String(t || '').replace(/\{nombre\}/gi, chat.name || '').replace(/\{palabra\}/gi, kw).replace(/ +([,!.?])/g, '$1').replace(/[ \t]{2,}/g, ' ').trim();
     let enviados = 0;
@@ -1816,10 +1827,12 @@
         if (cfg.ia.horas > 0 && Date.now() / 1000 - last.t > cfg.ia.horas * 3600) continue; // mensaje demasiado viejo (0 = sin límite)
         if ((iaSeen[c.id] || 0) >= last.t) continue; // ya atendido
         if (!iaCalifica(c)) continue; // no entra en ninguna modalidad activa
+        if (iaEngaged[c.id] && cfg.ia.modos.palabras && !iaSesionNueva(c) && iaKwMatch(c)) log('«' + c.name + '» ya estaba en atención de la IA: no se repiten los pasos, responde la IA');
         // palabra clave con pasos por defecto: se envían apenas llega la palabra; la IA continúa cuando el cliente responda
-        if (cfg.ia.modos.palabras && !iaEngaged[c.id]) {
+        if (cfg.ia.modos.palabras && (!iaEngaged[c.id] || iaSesionNueva(c))) {
           const kw = iaKwMatch(c);
           const paso = kw ? iaPasosDe(kw) : null;
+          if (kw && !paso) log('Palabra «' + kw + '» detectada en ' + c.name + ', pero no tiene pasos activos: responde la IA directamente');
           if (paso) {
             iaSeen[c.id] = last.t;
             if (!auto) {
