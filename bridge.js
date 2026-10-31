@@ -166,6 +166,17 @@
       return { ok: true };
     },
 
+    // Envía una imagen (data URL) con un texto opcional
+    async sendImage({ to, dataUrl, caption, filename }) {
+      const res = await WPP.chat.sendFileMessage(to, dataUrl, {
+        type: 'image',
+        filename: filename || 'imagen.jpg',
+        caption: caption || undefined,
+        createChat: true,
+      });
+      return { id: res && res.id };
+    },
+
     async send({ to, text, typingMs }) {
       if (typingMs > 0) {
         try { await WPP.chat.markIsComposing(to, typingMs); } catch {}

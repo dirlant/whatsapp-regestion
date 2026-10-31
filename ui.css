@@ -194,3 +194,11 @@ details.wam-more>summary::-webkit-details-marker{display:none}
 details.wam-more>summary::before{content:"ⓘ ";}
 details.wam-more[open]>summary{margin-bottom:4px}
 details.wam-more>.wam-hint{margin:2px 0 4px}
+
+/* pasos: texto o imagen */
+.wam-paso-cab{display:flex;align-items:center;gap:8px}
+.wam-paso-cab b{flex:0 0 auto}
+.wam-paso .wam-seg-mini{flex:1;margin:0;max-width:170px}
+.wam-paso .wam-seg-mini button{padding:3px 4px;font-size:12px}
+.wam-paso-cab a{position:static;margin-left:auto;color:var(--err);cursor:pointer;font-size:18px}
+.wam-paso-img{display:block;max-width:100%;max-height:130px;margin:6px 0;border-radius:8px;object-fit:contain;background:#0001}

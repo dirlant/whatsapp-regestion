@@ -244,10 +244,11 @@
           <p class="wam-hint" id="wam-iakw-nota" hidden>Bloqueado: activa la modalidad «Por palabras claves» para usar palabras claves.</p>
           <div id="wam-iapasos" hidden>
             <div class="wam-hint"><b id="wam-iapasos-tit">Pasos</b></div>
+            <div class="wam-hint">Cada paso puede ser un <b>texto</b> o una <b>imagen</b> (con un texto opcional).</div>
             <label class="wam-sw"><span>Enviar estos pasos cuando llegue esta palabra<small>Se mandan en orden apenas el cliente la escriba; después la IA continúa la conversación.</small></span><input type="checkbox" id="iaPasosOn"><i></i></label>
             <div id="wam-iapasos-lista"></div>
             <div class="wam-row"><button id="wam-iapaso-add" class="wam-btn alt">+ Agregar paso</button><button id="wam-iapaso-def" class="wam-btn alt">Pasos por defecto</button></div>
-            <p class="wam-hint">Puedes usar <code>{nombre}</code> (nombre del contacto) y <code>{palabra}</code> (la palabra clave detectada).</p>
+            <p class="wam-hint">Puedes usar <code>{nombre}</code> (nombre del contacto) y <code>{palabra}</code> (la palabra clave detectada), también en el texto que acompaña a una imagen. Las imágenes se reducen automáticamente para que se envíen rápido.</p>
           </div>
           <details class="wam-more"><summary>Más información</summary>
             <p class="wam-hint">Escribe una palabra o frase y pulsa <b>Enter</b> para agregarla; toca la × para quitarla; <b>toca una palabra</b> para configurar sus pasos (⚡ = tiene pasos activos). No distingue mayúsculas, minúsculas ni tildes («PRECIO», «Precio» y «precio» son lo mismo), y detecta la palabra aunque lleve más letras al final: «precio» también encuentra «precios». Desde que se activa en un chat, el asistente sigue la conversación aunque el cliente ya no use la palabra.</p>
@@ -1370,15 +1371,62 @@
   // ----- palabras claves como etiquetas: se escribe y con Enter se agrega; la × la quita -----
   // ----- pasos por defecto de cada palabra clave -----
   const PASOS_DEFECTO = ['¡Hola {nombre}! 😊 Gracias por escribirnos.', 'Ya vi tu mensaje sobre «{palabra}». En un momento te ayudo con todo el detalle.'];
+  const pasosDefecto = () => PASOS_DEFECTO.map((t) => ({ tipo: 'texto', texto: t }));
   const MAX_PASOS = 6;
   let iaKwSel = ''; // palabra clave (normalizada) seleccionada para editar sus pasos
+  // un paso es { tipo: 'texto', texto } o { tipo: 'imagen', imgId, nombre, caption }; se aceptan los pasos antiguos (solo texto, como cadena)
+  const iaPasoNorm = (x) => (x && typeof x === 'object' ? x : { tipo: 'texto', texto: String(x || '') });
   const iaPasosObj = (nk) => (cfg.ia.pasos[nk] || (cfg.ia.pasos[nk] = { on: false, textos: [] }));
-  // pasos activos y no vacíos de una palabra clave, o null
+  // ----- imágenes de los pasos: se reducen y se guardan aparte (una clave por imagen) para no hacer pesada la configuración -----
+  const iaImgCache = {};
+  const iaImgKey = (id) => 'wamImg_' + id;
+  const iaImgGuardar = async (id, dataUrl) => { iaImgCache[id] = dataUrl; await chrome.storage.local.set({ [iaImgKey(id)]: dataUrl }); };
+  const iaImgCargar = async (id) => {
+    if (!id) return '';
+    if (iaImgCache[id]) return iaImgCache[id];
+    const r = await chrome.storage.local.get(iaImgKey(id));
+    const v = r && r[iaImgKey(id)];
+    if (v) iaImgCache[id] = v;
+    return v || '';
+  };
+  const iaImgBorrar = (id) => { delete iaImgCache[id]; try { chrome.storage.local.remove(iaImgKey(id)); } catch {} };
+  const iaImgBorrarPaso = (x) => { const p = iaPasoNorm(x); if (p.tipo === 'imagen' && p.imgId) iaImgBorrar(p.imgId); };
+  const iaImg = {
+    // reduce la imagen (máx. 1280 px, JPEG) para que pese poco y se envíe rápido
+    comprimir: (file) => new Promise((resolve, reject) => {
+      if (file.size > 20 * 1024 * 1024) return reject(new Error('La imagen pesa más de 20 MB'));
+      const fr = new FileReader();
+      fr.onerror = () => reject(new Error('No se pudo leer la imagen'));
+      fr.onload = () => {
+        const img = new Image();
+        img.onerror = () => reject(new Error('El archivo no es una imagen válida'));
+        img.onload = () => {
+          const intentar = (max, q) => {
+            const k = Math.min(1, max / Math.max(img.width, img.height));
+            const w = Math.max(1, Math.round(img.width * k)), h = Math.max(1, Math.round(img.height * k));
+            const cv = document.createElement('canvas');
+            cv.width = w; cv.height = h;
+            const ctx = cv.getContext('2d');
+            ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); // los PNG con fondo transparente quedan sobre blanco
+            ctx.drawImage(img, 0, 0, w, h);
+            return cv.toDataURL('image/jpeg', q);
+          };
+          let d = intentar(1280, 0.82);
+          if (d.length > 1200000) d = intentar(960, 0.65);
+          if (d.length > 1200000) d = intentar(720, 0.55);
+          resolve(d);
+        };
+        img.src = fr.result;
+      };
+      fr.readAsDataURL(file);
+    }),
+  };
+  // pasos activos y completos de una palabra clave (texto con contenido o imagen ya elegida), o null
   const iaPasosDe = (k) => {
     const p = cfg.ia.pasos[iaNorm(k)];
     if (!p || !p.on) return null;
-    const textos = (p.textos || []).map((x) => String(x).trim()).filter(Boolean);
-    return textos.length ? { textos } : null;
+    const pasos = (p.textos || []).map(iaPasoNorm).filter((x) => (x.tipo === 'imagen' ? !!x.imgId : !!String(x.texto || '').trim()));
+    return pasos.length ? { pasos } : null;
   };
   const renderIaPasos = () => {
     const box = $('#wam-iapasos');
@@ -1386,26 +1434,83 @@
     box.hidden = !sel;
     if (!sel) return;
     const p = iaPasosObj(iaKwSel);
+    p.textos = p.textos.map(iaPasoNorm);
     $('#wam-iapasos-tit').textContent = 'Pasos para «' + sel + '»';
     $('#iaPasosOn').checked = !!p.on;
     const cont = $('#wam-iapasos-lista');
     cont.innerHTML = '';
-    p.textos.forEach((t, i) => {
+    p.textos.forEach((paso, i) => {
       const row = document.createElement('div');
       row.className = 'wam-paso';
+      const cab = document.createElement('div');
+      cab.className = 'wam-paso-cab';
       const n = document.createElement('b');
       n.textContent = 'Paso ' + (i + 1);
-      const ta = document.createElement('textarea');
-      ta.rows = 2;
-      ta.maxLength = 500;
-      ta.value = t;
-      ta.placeholder = 'Mensaje que se envía en este paso';
-      ta.oninput = () => { p.textos[i] = ta.value; save(); renderIaKwChips(true); };
+      const tipos = document.createElement('div');
+      tipos.className = 'wam-seg wam-seg-mini';
+      [['texto', 'Texto'], ['imagen', 'Imagen']].forEach(([tipo, rotulo]) => {
+        const b = document.createElement('button');
+        b.textContent = rotulo;
+        b.className = paso.tipo === tipo ? 'on' : '';
+        b.onclick = () => {
+          if (paso.tipo === tipo) return;
+          iaImgBorrarPaso(paso);
+          p.textos[i] = tipo === 'imagen' ? { tipo: 'imagen', imgId: '', nombre: '', caption: '' } : { tipo: 'texto', texto: '' };
+          save(); renderIaKwChips();
+        };
+        tipos.appendChild(b);
+      });
       const x = document.createElement('a');
       x.textContent = '×';
       x.title = 'Quitar paso';
-      x.onclick = () => { p.textos.splice(i, 1); save(); renderIaKwChips(); };
-      row.append(n, ta, x);
+      x.onclick = () => { iaImgBorrarPaso(paso); p.textos.splice(i, 1); save(); renderIaKwChips(); };
+      cab.append(n, tipos, x);
+      row.appendChild(cab);
+      if (paso.tipo === 'imagen') {
+        const vista = document.createElement('img');
+        vista.className = 'wam-paso-img';
+        vista.alt = '';
+        vista.hidden = !paso.imgId;
+        if (paso.imgId) iaImgCargar(paso.imgId).then((d) => { if (d) vista.src = d; else vista.hidden = true; });
+        const lab = document.createElement('label');
+        lab.className = 'wam-file';
+        const fi = document.createElement('input');
+        fi.type = 'file';
+        fi.accept = 'image/*';
+        const sp = document.createElement('span');
+        sp.textContent = paso.imgId ? 'Cambiar imagen (' + (paso.nombre || 'imagen') + ')' : 'Elegir imagen…';
+        fi.onchange = async () => {
+          const f = fi.files && fi.files[0];
+          if (!f) return;
+          if (!/^image\//.test(f.type || '')) { iaWarn('Elige un archivo de imagen (JPG, PNG, WebP…).'); return; }
+          try {
+            const dataUrl = await iaImg.comprimir(f);
+            if (paso.imgId) iaImgBorrar(paso.imgId);
+            const id = 'i' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+            await iaImgGuardar(id, dataUrl);
+            paso.imgId = id;
+            paso.nombre = f.name || 'imagen';
+            iaWarn('');
+            save(); renderIaKwChips();
+          } catch (e) { iaWarn('No se pudo usar la imagen: ' + e.message); }
+        };
+        lab.append(fi, sp);
+        const cap = document.createElement('textarea');
+        cap.rows = 2;
+        cap.maxLength = 500;
+        cap.value = paso.caption || '';
+        cap.placeholder = 'Texto que acompaña la imagen (opcional)';
+        cap.oninput = () => { paso.caption = cap.value; save(); };
+        row.append(vista, lab, cap);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.rows = 2;
+        ta.maxLength = 500;
+        ta.value = paso.texto || '';
+        ta.placeholder = 'Mensaje que se envía en este paso';
+        ta.oninput = () => { paso.texto = ta.value; save(); renderIaKwChips(true); };
+        row.appendChild(ta);
+      }
       cont.appendChild(row);
     });
     $('#wam-iapaso-add').disabled = p.textos.length >= MAX_PASOS;
@@ -1449,7 +1554,12 @@
   const iaKwQuitar = (i) => {
     const lista = iaKwLista();
     const [quitada] = lista.splice(i, 1);
-    if (quitada) { delete cfg.ia.pasos[iaNorm(quitada)]; if (iaKwSel === iaNorm(quitada)) iaKwSel = ''; }
+    if (quitada) {
+      const po = cfg.ia.pasos[iaNorm(quitada)];
+      if (po && po.textos) po.textos.forEach(iaImgBorrarPaso); // sus imágenes guardadas también se borran
+      delete cfg.ia.pasos[iaNorm(quitada)];
+      if (iaKwSel === iaNorm(quitada)) iaKwSel = '';
+    }
     cfg.ia.palabras = lista.join('\n');
     iaKwCambio();
   };
@@ -1476,21 +1586,22 @@
     if (!iaKwSel) return;
     const p = iaPasosObj(iaKwSel);
     p.on = e.target.checked;
-    if (p.on && !p.textos.some((x) => String(x).trim())) p.textos = [...PASOS_DEFECTO]; // al activarlos por primera vez se cargan los pasos por defecto
+    if (p.on && !iaPasosDe(iaKwSel)) { p.textos.forEach(iaImgBorrarPaso); p.textos = pasosDefecto(); } // al activarlos por primera vez (sin pasos completos) se cargan los pasos por defecto
     save(); renderIaKwChips();
   };
   $('#wam-iapaso-add').onclick = () => {
     if (!iaKwSel) return;
     const p = iaPasosObj(iaKwSel);
     if (p.textos.length >= MAX_PASOS) return;
-    p.textos.push('');
+    p.textos.push({ tipo: 'texto', texto: '' });
     save(); renderIaPasos();
   };
   $('#wam-iapaso-def').onclick = () => {
     if (!iaKwSel) return;
     const p = iaPasosObj(iaKwSel);
-    if (p.textos.some((x) => String(x).trim()) && !confirm('Se reemplazarán los pasos actuales por los pasos por defecto. ¿Continuar?')) return;
-    p.textos = [...PASOS_DEFECTO];
+    if (iaPasosDe(iaKwSel) && !confirm('Se reemplazarán los pasos actuales por los pasos por defecto. ¿Continuar?')) return;
+    p.textos.forEach(iaImgBorrarPaso);
+    p.textos = pasosDefecto();
     save(); renderIaKwChips();
   };
   const iaSetModo = (clave, on) => {
@@ -1580,7 +1691,13 @@
         tit.className = 'wam-hint';
         tit.textContent = 'Pasos de «' + s.palabra + '» (se envían en orden; luego la IA continúa la conversación):';
         card.append(h, q, tit);
-        s.pasos.forEach((p, i) => { const d = document.createElement('div'); d.className = 'wam-iapaso'; d.textContent = (i + 1) + '. ' + p; card.appendChild(d); });
+        s.pasos.forEach((x, i) => {
+          const p = iaPasoNorm(x);
+          const d = document.createElement('div');
+          d.className = 'wam-iapaso';
+          d.textContent = (i + 1) + '. ' + (p.tipo === 'imagen' ? '🖼 Imagen' + (p.nombre ? ': ' + p.nombre : '') + (p.caption ? ' — «' + p.caption + '»' : '') : p.texto);
+          card.appendChild(d);
+        });
       } else {
         ta = document.createElement('textarea');
         ta.rows = 3;
@@ -1658,18 +1775,25 @@
   };
   // Envía los pasos de una palabra clave en orden (con pausas cortas) y deja el chat "en atención" de la IA:
   // cuando el cliente responda, la IA continúa la conversación con los pasos ya en el historial.
-  const iaEnviarPasos = async (chat, kw, textos) => {
-    const vars = (t) => String(t).replace(/\{nombre\}/gi, chat.name || '').replace(/\{palabra\}/gi, kw).replace(/ +([,!.?])/g, '$1').replace(/[ \t]{2,}/g, ' ').trim();
+  const iaEnviarPasos = async (chat, kw, pasos) => {
+    const vars = (t) => String(t || '').replace(/\{nombre\}/gi, chat.name || '').replace(/\{palabra\}/gi, kw).replace(/ +([,!.?])/g, '$1').replace(/[ \t]{2,}/g, ' ').trim();
     let enviados = 0;
     try {
-      for (let i = 0; i < textos.length; i++) {
+      for (let i = 0; i < pasos.length; i++) {
         if (!lic.valid) break;
-        const t = vars(textos[i]);
-        if (!t) continue;
-        await call('send', { to: chat.id, text: t, typingMs: iaTyping(t) });
+        const paso = iaPasoNorm(pasos[i]);
+        if (paso.tipo === 'imagen') {
+          const dataUrl = await iaImgCargar(paso.imgId);
+          if (!dataUrl) throw new Error('no se encontró la imagen del paso ' + (i + 1) + ' (vuelve a elegirla)');
+          await call('sendImage', { to: chat.id, dataUrl, caption: vars(paso.caption), filename: paso.nombre || 'imagen.jpg' });
+        } else {
+          const t = vars(paso.texto);
+          if (!t) continue;
+          await call('send', { to: chat.id, text: t, typingMs: iaTyping(t) });
+        }
         iaSentT[chat.id] = Math.floor(Date.now() / 1000);
         enviados++;
-        if (i < textos.length - 1) await sleep(rnd(1500, 3000));
+        if (i < pasos.length - 1) await sleep(rnd(1500, 3000));
       }
       if (!enviados) return false; // no se envió ningún paso: el chat no queda en atención de la IA
       iaEngaged[chat.id] = true;
@@ -1760,11 +1884,11 @@
             iaSeen[c.id] = last.t;
             if (!auto) {
               iaSug = iaSug.filter((x) => x.chatId !== c.id);
-              iaSug.unshift({ chatId: c.id, name: c.name, labels: c.labels, lastText: last.texto.slice(0, 200), respuesta: '', pasos: paso.textos, palabra: kw, etiquetaId: '', t: last.t });
+              iaSug.unshift({ chatId: c.id, name: c.name, labels: c.labels, lastText: last.texto.slice(0, 200), respuesta: '', pasos: paso.pasos, palabra: kw, etiquetaId: '', t: last.t });
               nuevas++;
             } else {
               iaInFlight.add(c.id);
-              try { await iaEnviarPasos({ id: c.id, name: c.name, labels: c.labels }, kw, paso.textos); } finally { iaInFlight.delete(c.id); }
+              try { await iaEnviarPasos({ id: c.id, name: c.name, labels: c.labels }, kw, paso.pasos); } finally { iaInFlight.delete(c.id); }
             }
             continue;
           }
