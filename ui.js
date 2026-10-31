@@ -62,7 +62,7 @@
     hourTo: 20,
     source: 'label',
     cc: '',
-    ia: { on: false, mode: 'sugerencia', scope: 'etiquetas', modos: { etiquetas: true, palabras: false, todos: false, nuevos: false, noLeidos: false }, pasos: {}, labels: [], instrucciones: '', maxDia: 100, horas: 0, instrAplicadas: '', horarioOn: true, inicio: '08:00', cierre: '20:00', palabras: '', kwExtra: false, consent: false },
+    ia: { on: false, mode: 'auto', scope: 'etiquetas', modos: { etiquetas: true, palabras: false, todos: false, nuevos: false, noLeidos: false }, pasos: {}, labels: [], instrucciones: '', maxDia: 100, horas: 0, instrAplicadas: '', horarioOn: true, inicio: '08:00', cierre: '20:00', palabras: '', kwExtra: false, consent: false },
     messages: [...EXAMPLE_MSGS],
   };
   let cfg = { ...DEFAULTS };
@@ -222,12 +222,7 @@
         <div id="wam-iawarn" class="wam-notice bad" hidden></div>
         <div id="wam-iastatus" class="wam-hint">IA apagada.</div>
 
-        <div class="wam-hint"><b>Modo</b></div>
-        <div class="wam-seg" id="wam-iamode">
-          <button data-m="sugerencia" class="on">Sugerencia</button>
-          <button data-m="auto">Automático</button>
-        </div>
-        <p class="wam-hint">Sugerencia: la IA propone y tú apruebas. Automático: la IA responde sola y enseguida (unos 3 segundos), respetando el horario y el límite diario. Las pausas largas son solo para los envíos masivos.</p>
+        <p class="wam-hint">La IA responde sola y enseguida (unos 3 segundos), respetando el horario y el límite diario. Las pausas largas son solo para los envíos masivos.</p>
 
         <div class="wam-hint"><b>Modalidades</b> (activa una o varias)</div>
         <div id="wam-iamodos">
@@ -241,14 +236,16 @@
         <div id="wam-iakwbox">
           <div class="wam-hint"><b>Palabras claves para activar al asistente</b></div>
           <div id="wam-kwchips" class="wam-chips"><input id="iaKwInput" placeholder="Escribe una palabra y pulsa Enter" autocomplete="off" maxlength="60"></div>
-          <p class="wam-hint" id="wam-iakw-nota" hidden>Bloqueado: activa la modalidad «Por palabras claves» para usar palabras claves.</p>
-          <div id="wam-iapasos" hidden>
+          <div id="wam-iapasos">
+            <p class="wam-hint" id="wam-iapasos-vacio"><b>Pasos de cada palabra clave:</b> agrega una palabra arriba (o toca una que ya tengas) para decidir qué se envía primero —textos o imágenes— cuando un cliente la escriba, antes de que la IA empiece a responder.</p>
+            <div id="wam-iapasos-cuerpo" hidden>
             <div class="wam-hint"><b id="wam-iapasos-tit">Pasos</b></div>
             <div class="wam-hint">Cada paso puede ser un <b>texto</b> o una <b>imagen</b> (con un texto opcional).</div>
             <label class="wam-sw"><span>Enviar estos pasos primero<small>Cuando el cliente escriba esta palabra, se mandan en orden estos primeros pasos; solo después la IA empieza a responder.</small></span><input type="checkbox" id="iaPasosOn"><i></i></label>
             <div id="wam-iapasos-lista"></div>
             <div class="wam-row"><button id="wam-iapaso-add" class="wam-btn alt">+ Agregar paso</button><button id="wam-iapaso-def" class="wam-btn alt">Pasos por defecto</button></div>
             <p class="wam-hint">Puedes usar <code>{nombre}</code> (nombre del contacto) y <code>{palabra}</code> (la palabra clave detectada), también en el texto que acompaña a una imagen. Las imágenes se reducen automáticamente para que se envíen rápido.</p>
+            </div>
           </div>
           <details class="wam-more"><summary>Más información</summary>
             <p class="wam-hint">Escribe una palabra o frase y pulsa <b>Enter</b> para agregarla; toca la × para quitarla; <b>toca una palabra</b> para configurar sus pasos (⚡ = tiene pasos activos). No distingue mayúsculas, minúsculas ni tildes («PRECIO», «Precio» y «precio» son lo mismo), y detecta la palabra aunque lleve más letras al final: «precio» también encuentra «precios». Desde que se activa en un chat, el asistente sigue la conversación aunque el cliente ya no use la palabra.</p>
@@ -275,9 +272,6 @@
         <p class="wam-hint" id="wam-iahorario"></p>
         <button id="wam-ianow" class="wam-btn alt">Revisar ahora</button>
       </div>
-
-      <h4>Sugerencias para aprobar</h4>
-      <div class="wam-card"><div id="wam-iasug">No hay sugerencias pendientes.</div></div>
 
       <h4>Necesitan a una persona</h4>
       <div class="wam-card"><div id="wam-iahuman" class="wam-list small">Ninguno.</div></div>
@@ -1279,9 +1273,7 @@
     const m = cfg.ia.modos;
     panel.querySelectorAll('#wam-iamodos input[data-modo]').forEach((i) => { i.checked = !!m[i.dataset.modo]; });
     // cada módulo solo funciona si su modalidad está activa: si no, queda bloqueado (y la IA no lo usa)
-    $('#wam-iakwbox').className = m.palabras ? '' : 'wam-bloqueado';
-    $('#iaKwInput').disabled = !m.palabras;
-    $('#wam-iakw-nota').hidden = !!m.palabras;
+    $('#wam-iakwbox').hidden = !m.palabras; // las palabras claves y sus pasos solo aparecen con el interruptor «Por palabras claves» encendido
     $('#wam-ialabels-box').hidden = !m.etiquetas; // las etiquetas solo aparecen con el interruptor «Por etiquetas» encendido
     renderIaLabels();
     const nombres = { etiquetas: 'con las etiquetas elegidas', palabras: 'cuando un mensaje entrante tenga una palabra clave', todos: 'todos los chats individuales', nuevos: 'las conversaciones nuevas' };
@@ -1380,7 +1372,8 @@
   const renderIaPasos = () => {
     const box = $('#wam-iapasos');
     const sel = iaKwLista().find((k) => iaNorm(k) === iaKwSel);
-    box.hidden = !sel;
+    $('#wam-iapasos-vacio').hidden = !!sel;
+    $('#wam-iapasos-cuerpo').hidden = !sel;
     if (!sel) return;
     const p = iaPasosObj(iaKwSel);
     p.textos = p.textos.map(iaPasoNorm);
@@ -1624,6 +1617,7 @@
   };
   const renderIaSug = () => {
     const box = $('#wam-iasug');
+    if (!box) return; // el modo sugerencia ya no existe
     box.innerHTML = '';
     if (!iaSug.length) { box.textContent = 'No hay sugerencias pendientes.'; return; }
     iaSug.forEach((s) => {
@@ -1701,7 +1695,6 @@
     $('#iaInicio').value = cfg.ia.inicio;
     $('#iaCierre').value = cfg.ia.cierre;
     renderIaHorario();
-    panel.querySelectorAll('#wam-iamode button').forEach((b) => b.classList.toggle('on', b.dataset.m === cfg.ia.mode));
     renderIaLabels(); renderIaSug(); renderIaHuman();
   };
 
@@ -1792,7 +1785,7 @@
     const full = !onlyIds;
     if (full && iaBusy) { iaAgain = true; return; } // se repite apenas termine la revisión completa en curso
     if (!iaCanRun()) { if (manual) setIaStatus('Activa la IA y elige al menos una etiqueta.'); return; }
-    const auto = cfg.ia.mode === 'auto';
+    const auto = true;
     if (iaPausedDay === iaDay()) return setIaStatus('Se alcanzó el tope diario de consultas de IA. Continúa mañana.');
     if (auto && iaHorarioActivo() && !iaEnHorario()) return setIaStatus('Fuera del horario de trabajo (' + cfg.ia.inicio + '–' + cfg.ia.cierre + '). La IA retoma a las ' + cfg.ia.inicio + '.');
     if (full) iaBusy = true;
@@ -1877,7 +1870,7 @@
         }
       }
       iaPersist(); renderIaSug(); renderIaHuman();
-      setIaStatus(aviso || 'IA activa (' + (auto ? 'automático' : 'sugerencia') + ') · ' + (auto ? 'respuestas hoy: ' + iaToday() + ' · ' : '') + 'sugerencias: ' + iaSug.length + ' · requieren persona: ' + iaHuman.length + (nuevas ? ' · ' + nuevas + ' nuevas' : ''));
+      setIaStatus(aviso || 'IA activa · respuestas hoy: ' + iaToday() + ' · requieren persona: ' + iaHuman.length + (nuevas ? ' · ' + nuevas + ' nuevas' : ''));
     } catch (e) {
       setIaStatus('Error: ' + e.message);
     } finally {
@@ -1909,10 +1902,10 @@
     if (!iaModosActivos().length) { iaWarn('Activa al menos una modalidad (por etiquetas, palabras claves, todos los chats…).'); return; }
     if (cfg.ia.modos.etiquetas && !cfg.ia.labels.length) { iaWarn('La modalidad «Por etiquetas» está activa: elige al menos una etiqueta (o apaga la modalidad).'); return; }
     if (cfg.ia.modos.palabras && !iaKeywords().length) { iaWarn('Escribe al menos una palabra clave (o apaga la modalidad «Por palabras claves»).'); return; }
-    if (cfg.ia.modos.todos && cfg.ia.mode === 'auto' && !confirm('Con «Para todos los chats» el asistente responderá solo a TODAS las conversaciones individuales con respuesta pendiente, incluso antiguas. Conviene probar antes en modo Sugerencia. ¿Iniciarlo igual?')) return;
+    if (cfg.ia.modos.todos && !confirm('Con «Para todos los chats» el asistente responderá solo a TODAS las conversaciones individuales con respuesta pendiente, incluso antiguas. ¿Iniciarlo igual?')) return;
     if (!lic.valid) { iaWarn('La licencia no está activa.'); return; }
     if (!cfg.ia.consent && !confirm('Las conversaciones con respuesta pendiente se enviarán a un servicio de IA para generar las respuestas. ¿Continuar?')) return;
-    if (cfg.ia.mode === 'auto' && !confirm('En modo automático la IA responderá sola a tus clientes. ¿Iniciarla?')) return;
+    if (!confirm('La IA responderá sola a tus clientes. ¿Iniciarla?')) return;
     cfg.ia.consent = true;
     iaWarn('');
     cfg.ia.on = true;
@@ -1930,16 +1923,6 @@
   };
   $('#wam-iastart').onclick = iaStart;
   $('#wam-iapause').onclick = iaPauseNow;
-  panel.querySelectorAll('#wam-iamode button').forEach((b) => {
-    b.onclick = () => {
-      if (b.dataset.m === cfg.ia.mode) return;
-      if (b.dataset.m === 'auto' && cfg.ia.on && !confirm('En modo automático la IA responderá sola a tus clientes. ¿Cambiar?')) return;
-      cfg.ia.mode = b.dataset.m;
-      save();
-      syncIa();
-      if (cfg.ia.on) iaScan(true);
-    };
-  });
   const iaHorarioCambio = () => { save(); renderIaHorario(); if (cfg.ia.on) iaScan(true); };
   $('#iaHorarioOn').onchange = (e) => { cfg.ia.horarioOn = e.target.checked; iaHorarioCambio(); };
   $('#iaInicio').onchange = (e) => { if (iaMin(e.target.value) !== null) cfg.ia.inicio = e.target.value; else e.target.value = cfg.ia.inicio; iaHorarioCambio(); };
@@ -1975,7 +1958,7 @@
   });
   chrome.storage.local.get('wamIa').then(({ wamIa }) => {
     if (!wamIa) return;
-    iaSeen = wamIa.seen || {}; iaSug = Array.isArray(wamIa.sug) ? wamIa.sug : []; iaHuman = Array.isArray(wamIa.human) ? wamIa.human : [];
+    iaSeen = wamIa.seen || {}; iaSug = []; iaHuman = Array.isArray(wamIa.human) ? wamIa.human : [];
     iaCount = wamIa.count || iaCount;
     iaEngaged = wamIa.engaged || {}; iaSentT = wamIa.sentT || {}; iaPause = wamIa.pause || {};
     renderIaSug(); renderIaHuman();
@@ -1994,6 +1977,7 @@
     }
     if (cfg.source !== 'excel') cfg.source = 'label';
     cfg.ia = { ...DEFAULTS.ia, ...(wamCfg && wamCfg.ia ? wamCfg.ia : {}) };
+    cfg.ia.mode = 'auto'; // el modo sugerencia ya no existe
     if (!Array.isArray(cfg.ia.labels)) cfg.ia.labels = [];
     if (iaMin(cfg.ia.inicio) === null) cfg.ia.inicio = '08:00';
     if (iaMin(cfg.ia.cierre) === null) cfg.ia.cierre = '20:00';
