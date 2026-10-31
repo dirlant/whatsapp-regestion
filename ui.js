@@ -249,9 +249,13 @@
             <div class="wam-row"><button id="wam-iapaso-add" class="wam-btn alt">+ Agregar paso</button><button id="wam-iapaso-def" class="wam-btn alt">Pasos por defecto</button></div>
             <p class="wam-hint">Puedes usar <code>{nombre}</code> (nombre del contacto) y <code>{palabra}</code> (la palabra clave detectada).</p>
           </div>
-          <p class="wam-hint">Escribe una palabra o frase y pulsa <b>Enter</b> para agregarla; toca la × para quitarla; <b>toca una palabra</b> para configurar sus pasos (⚡ = tiene pasos activos). No distingue mayúsculas, minúsculas ni tildes («PRECIO», «Precio» y «precio» son lo mismo), y detecta la palabra aunque lleve más letras al final: «precio» también encuentra «precios». Desde que se activa en un chat, el asistente sigue la conversación aunque el cliente ya no use la palabra.</p>
+          <details class="wam-more"><summary>Más información</summary>
+            <p class="wam-hint">Escribe una palabra o frase y pulsa <b>Enter</b> para agregarla; toca la × para quitarla; <b>toca una palabra</b> para configurar sus pasos (⚡ = tiene pasos activos). No distingue mayúsculas, minúsculas ni tildes («PRECIO», «Precio» y «precio» son lo mismo), y detecta la palabra aunque lleve más letras al final: «precio» también encuentra «precios». Desde que se activa en un chat, el asistente sigue la conversación aunque el cliente ya no use la palabra.</p>
+          </details>
         </div>
-        <p class="wam-hint">Al activarla busca los chats y, si falta tu respuesta (el último mensaje es del cliente), continúa la conversación, leído o no. Solo chats individuales (no grupos). Si una persona del equipo responde en un chat, la IA se aparta de ese chat 24 horas.</p>
+        <details class="wam-more"><summary>Más información</summary>
+          <p class="wam-hint">Al activarla busca los chats y, si falta tu respuesta (el último mensaje es del cliente), continúa la conversación, leído o no. Solo chats individuales (no grupos). Si una persona del equipo responde en un chat, la IA se aparta de ese chat 24 horas.</p>
+        </details>
 
         <div id="wam-ialabels-box">
           <div class="wam-hint"><b>Etiquetas que usará la IA</b> (elige al menos una)</div>

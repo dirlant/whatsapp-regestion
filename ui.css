@@ -186,3 +186,11 @@ details label{display:flex;justify-content:space-between;align-items:center;marg
 .wam-paso textarea{margin-top:3px;padding-right:26px!important}
 .wam-paso a{position:absolute;top:16px;right:8px;color:var(--err);cursor:pointer;font-size:18px}
 .wam-iapaso{padding:6px 9px;margin:5px 0;border-radius:8px;background:var(--card);white-space:pre-wrap;font-size:13px}
+
+/* "Más información": texto de ayuda plegado como un enlace */
+details.wam-more{border-top:0;padding-top:0;margin:4px 0 6px}
+details.wam-more>summary{display:inline-block;padding:0;font-size:12.5px;color:var(--green);cursor:pointer;list-style:none}
+details.wam-more>summary::-webkit-details-marker{display:none}
+details.wam-more>summary::before{content:"ⓘ ";}
+details.wam-more[open]>summary{margin-bottom:4px}
+details.wam-more>.wam-hint{margin:2px 0 4px}
