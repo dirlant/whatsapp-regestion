@@ -271,6 +271,8 @@
         <label>Hora de cierre <span><input type="time" id="iaCierre"></span></label>
         <p class="wam-hint" id="wam-iahorario"></p>
         <button id="wam-ianow" class="wam-btn alt">Revisar ahora</button>
+        <button id="wam-iareset" class="wam-btn alt danger">Reiniciar IA (empezar de cero)</button>
+        <p class="wam-hint">Reiniciar borra lo que la IA recuerda: qué chats ya atendió, cuáles tenía en atención, a quién ya le envió los pasos y la lista «Necesitan a una persona». Tu configuración (palabras, pasos, etiquetas, entrenamiento, horario) se conserva.</p>
       </div>
 
       <h4>Necesitan a una persona</h4>
@@ -1971,6 +1973,16 @@
     if (cfg.ia.on) iaScan(true);
   };
   $('#wam-ianow').onclick = () => iaScan(true);
+  $('#wam-iareset').onclick = () => {
+    if (!confirm('La IA olvidará todo lo que recuerda (chats atendidos, chats en atención, pasos ya enviados y la lista de «Necesitan a una persona») y empezará de cero. Tu configuración se conserva y la IA quedará en pausa hasta que pulses «Iniciar IA». ¿Reiniciar?')) return;
+    iaSeen = {}; iaSug = []; iaHuman = []; iaEngaged = {}; iaSentT = {}; iaPasosT = {}; iaPause = {}; iaPausedDay = 0;
+    clearTimeout(iaHoldTimer); iaHoldUntil = 0;
+    cfg.ia.on = false;
+    save(); iaPersist(); renderIaRun(); renderIaHuman();
+    iaWarn('');
+    setIaStatus('IA reiniciada: empieza de cero y está en pausa. Pulsa «Iniciar IA» cuando quieras que vuelva a trabajar.');
+    log('IA reiniciada: se borró su memoria de chats atendidos');
+  };
   setInterval(() => iaScan(false), IA_SCAN_MS);
 
   // ---------- init ----------
