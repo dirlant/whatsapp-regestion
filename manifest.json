@@ -60,7 +60,9 @@
         "icons/icon48.png",
         "icons/mark.png",
         "icons/logo.png",
-        "icons/wordmark.png"
+        "icons/wordmark.png",
+        "icons/wordmark-dark.png",
+        "icons/mark-dark.png"
       ],
       "matches": [
         "https://web.whatsapp.com/*"

@@ -82,7 +82,7 @@
   root.id = 'wam-root';
   root.innerHTML = `
   <div id="wam-panel" hidden>
-    <div class="wam-head"><img id="wam-logo" alt=""><div class="wam-title" title="Envíos masivos"><img id="wam-word" alt="Beautychat"></div><button id="wam-bell" class="wam-bell" title="Avisos"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><b id="wam-avibadge" class="wam-badge" hidden></b></button><button id="wam-about" class="wam-aboutbtn" title="Estado y licencia">Acerca</button><button id="wam-close" title="Cerrar">×</button></div>
+    <div class="wam-head"><img id="wam-logo" class="wam-lt" alt=""><img id="wam-logo-d" class="wam-dk" alt=""><div class="wam-title" title="Envíos masivos"><img id="wam-word" class="wam-wd wam-lt" alt="Creatuchat"><img id="wam-word-d" class="wam-wd wam-dk" alt="Creatuchat"></div><button id="wam-bell" class="wam-bell" title="Avisos"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><b id="wam-avibadge" class="wam-badge" hidden></b></button><button id="wam-about" class="wam-aboutbtn" title="Estado y licencia">Acerca</button><button id="wam-close" title="Cerrar">×</button></div>
     <div id="wam-avibox" hidden>
       <div class="wam-avihead"><b>Avisos</b></div>
       <div class="wam-sum"><span id="wam-avinfo">Sin avisos.</span>
@@ -99,7 +99,7 @@
 
     <div id="wam-gate">
       <div class="wam-card">
-        <img id="wam-biglogo" alt="Beautychat">
+        <img id="wam-biglogo" alt="Creatuchat">
         <b>Activar licencia</b>
         <input id="wam-token" placeholder="Token de licencia" autocomplete="off">
         <p class="wam-hint">Número de WhatsApp detectado: <b id="wam-num">…</b></p>
@@ -297,6 +297,8 @@
   $('#wam-logo').src = chrome.runtime.getURL('icons/mark.png');
   $('#wam-biglogo').src = chrome.runtime.getURL('icons/logo.png');
   $('#wam-word').src = chrome.runtime.getURL('icons/wordmark.png');
+  $('#wam-logo-d').src = chrome.runtime.getURL('icons/mark-dark.png');
+  $('#wam-word-d').src = chrome.runtime.getURL('icons/wordmark-dark.png');
   $('#wam-close').onclick = () => (panel.hidden = true);
   $('#wam-aboutver').textContent = chrome.runtime.getManifest().version;
   // un solo desplegable abierto a la vez: avisos (campanita) o "Acerca"
@@ -1725,8 +1727,8 @@
     const remove = cfg.ia.labels.filter((id) => id !== String(labelId) && (chatLabels || []).includes(id));
     try { await call('iaSetLabel', { chatId, add: String(labelId), remove }); } catch (e) { log('No se pudo etiquetar: ' + e.message, 'err'); }
   };
-  // en plena conversación el cliente espera: "escribiendo…" apenas ~1 s (las pausas largas son solo para envíos masivos)
-  const iaTyping = (t) => (cfg.typing ? Math.min(1500, 400 + String(t).length * 8) : 0);
+  // «escribiendo…» visible ~3 s + un tiempo según el largo del texto (~45 ms por letra, tope 15 s), con una pequeña variación al azar
+  const iaTyping = (t) => Math.round(Math.min(15000, 3000 + String(t).length * 45) * (0.92 + Math.random() * 0.16));
   const iaDeliver = async (chat, text, labelId) => {
     await call('send', { to: chat.id, text, typingMs: iaTyping(text) });
     iaSentT[chat.id] = Math.floor(Date.now() / 1000); // para distinguir luego si una persona del equipo tomó el chat
