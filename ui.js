@@ -806,7 +806,6 @@
   const LIC_REASONS = {
     token_no_encontrado: 'El token no existe. Revísalo.',
     numero_no_coincide: 'Este token pertenece a otro número de WhatsApp.',
-    licencia_revocada: 'La licencia fue revocada.',
     licencia_vencida: 'La licencia está vencida.',
     ia_no_habilitada: 'Tu licencia no incluye el asistente con IA.',
   };
