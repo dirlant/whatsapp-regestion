@@ -791,12 +791,13 @@
     numero_no_coincide: 'Este token pertenece a otro número de WhatsApp.',
     licencia_revocada: 'La licencia fue revocada.',
     licencia_vencida: 'La licencia está vencida.',
+    ia_no_habilitada: 'Tu licencia no incluye el asistente con IA.',
   };
   const GRACE_MS = 24 * 3600 * 1000; // sin conexión: se tolera hasta 24 h desde la última verificación correcta
   const todayStr = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
-  let lic = { token: '', valid: false, until: '', number: '', checkedAt: 0, reason: '', detail: '', checking: false };
+  let lic = { token: '', valid: false, ia: false, until: '', number: '', checkedAt: 0, reason: '', detail: '', checking: false };
   let gateOpen = false;
-  const saveLic = () => chrome.storage.local.set({ wamLic: { token: lic.token, valid: lic.valid, until: lic.until, number: lic.number, checkedAt: lic.checkedAt } });
+  const saveLic = () => chrome.storage.local.set({ wamLic: { token: lic.token, valid: lic.valid, ia: lic.ia, until: lic.until, number: lic.number, checkedAt: lic.checkedAt } });
 
   const renderLic = () => {
     const st = $('#wam-licstat');
@@ -811,6 +812,20 @@
     $('#wam-gate').hidden = lic.valid && !gateOpen;
     $('#wam-gate-close').hidden = !lic.valid;
     $('#wam-start').disabled = !lic.valid || !!(cfg.ia && cfg.ia.on);
+    renderIaAcceso();
+  };
+  // la pestaña IA solo existe para las licencias que el administrador habilitó para el asistente con IA
+  const renderIaAcceso = () => {
+    const permitido = !!(lic.valid && lic.ia);
+    const tab = panel.querySelector('[data-tab="ia"]');
+    if (tab) {
+      tab.hidden = !permitido;
+      if (!permitido && tab.classList.contains('on')) { const env = panel.querySelector('[data-tab="env"]'); if (env) env.click(); }
+    }
+    if (!permitido && lic.token && !lic.checking && cfg.ia && cfg.ia.on) {
+      cfg.ia.on = false; save(); // sin permiso la IA se apaga sola
+      try { renderIaRun(); } catch {}
+    }
   };
   $('#wam-licstat').onclick = () => { gateOpen = true; renderLic(); };
   $('#wam-changelic').onclick = () => { $('#wam-aboutbox').hidden = true; $('#wam-avibox').hidden = true; gateOpen = true; renderLic(); };
@@ -846,9 +861,9 @@
         : 'Respuesta del servidor: HTTP ' + r.status + (r.data && r.data.motivo ? ' · ' + r.data.motivo : '') + (r.data && r.data.valida ? ' · válida' : '');
       if (r.status === 200 && r.data) {
         if (r.data.valida) {
-          lic.valid = true; lic.until = r.data.fecha_vencimiento || ''; lic.reason = ''; lic.checkedAt = Date.now();
+          lic.valid = true; lic.ia = r.data.ia === true; lic.until = r.data.fecha_vencimiento || ''; lic.reason = ''; lic.checkedAt = Date.now();
         } else {
-          lic.valid = false; lic.reason = LIC_REASONS[r.data.motivo] || 'Licencia no válida.';
+          lic.valid = false; lic.ia = false; lic.reason = LIC_REASONS[r.data.motivo] || 'Licencia no válida.';
         }
       } else if (r.status === 400) {
         lic.valid = false; lic.reason = 'Falta el token o el número.';
