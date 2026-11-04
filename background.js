@@ -67,3 +67,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, send) => {
     .catch((e) => send({ error: e.message }));
   return true; // respuesta asíncrona
 });
+
+// Actualizaciones: versión publicada en el repositorio de GitHub (manifest.json de la rama main)
+const UPDATE_URL = 'https://raw.githubusercontent.com/dirlant/whatsapp-regestion/main/manifest.json';
+chrome.runtime.onMessage.addListener((msg, _sender, send) => {
+  if (!msg || msg.type !== 'wam-update') return;
+  fetch(UPDATE_URL + '?t=' + Date.now(), { cache: 'no-store' })
+    .then(async (r) => send({ status: r.status, version: r.ok ? String((await r.json().catch(() => ({}))).version || '') : '' }))
+    .catch((e) => send({ error: e.message }));
+  return true;
+});

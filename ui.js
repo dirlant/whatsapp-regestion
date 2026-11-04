@@ -82,7 +82,7 @@
   root.id = 'wam-root';
   root.innerHTML = `
   <div id="wam-panel" hidden>
-    <div class="wam-head"><img id="wam-logo" class="wam-lt" alt=""><img id="wam-logo-d" class="wam-dk" alt=""><div class="wam-title" title="Envíos masivos"><img id="wam-word" class="wam-wd wam-lt" alt="Creatuchat"><img id="wam-word-d" class="wam-wd wam-dk" alt="Creatuchat"></div><button id="wam-bell" class="wam-bell" title="Avisos"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><b id="wam-avibadge" class="wam-badge" hidden></b></button><button id="wam-reflic" class="wam-aboutbtn wam-reflic" title="Actualizar: revisa el estado de tu licencia y tus permisos (como la IA)">↻</button><button id="wam-about" class="wam-aboutbtn" title="Estado y licencia">Acerca</button><button id="wam-close" title="Cerrar">×</button></div>
+    <div class="wam-head"><img id="wam-logo" class="wam-lt" alt=""><img id="wam-logo-d" class="wam-dk" alt=""><div class="wam-title" title="Envíos masivos"><img id="wam-word" class="wam-wd wam-lt" alt="Creatuchat"><img id="wam-word-d" class="wam-wd wam-dk" alt="Creatuchat"></div><button id="wam-bell" class="wam-bell" title="Avisos"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><b id="wam-avibadge" class="wam-badge" hidden></b></button><a id="wam-dl" class="wam-aboutbtn wam-reflic" href="https://github.com/dirlant/whatsapp-regestion/archive/refs/heads/main.zip" target="_blank" rel="noopener noreferrer" title="Descargar la última versión de la extensión (GitHub)">⬇</a><button id="wam-reflic" class="wam-aboutbtn wam-reflic" title="Actualizar: revisa el estado de tu licencia y tus permisos (como la IA)">↻</button><button id="wam-about" class="wam-aboutbtn" title="Estado y licencia">Acerca</button><button id="wam-close" title="Cerrar">×</button></div>
     <div id="wam-avibox" hidden>
       <div class="wam-avihead"><b>Avisos</b></div>
       <div class="wam-sum"><span id="wam-avinfo">Sin avisos.</span>
@@ -311,9 +311,10 @@
     const ia0 = !!(lic.valid && lic.ia);
     let ok = false;
     try { ok = await checkLicense(); } catch {}
+    let nueva = ''; try { nueva = await checkUpdate(); } catch {}
     b.classList.remove('spin'); b.disabled = false;
     const ia1 = !!(lic.valid && lic.ia);
-    const msg = !lic.token ? 'Sin licencia: ingresa tu token.' : !ok ? (lic.reason || 'Licencia no válida.') : 'Licencia al día hasta ' + lic.until + ' · IA ' + (ia1 ? 'habilitada' : 'no incluida') + (ia1 !== ia0 ? ' (cambió)' : '');
+    const msg = !lic.token ? 'Sin licencia: ingresa tu token.' : !ok ? (lic.reason || 'Licencia no válida.') : 'Licencia al día hasta ' + lic.until + ' · IA ' + (ia1 ? 'habilitada' : 'no incluida') + (ia1 !== ia0 ? ' (cambió)' : '') + (nueva ? ' · NUEVA ACTUALIZACIÓN ' + nueva + ': usa el botón ⬇' : '');
     log('Actualizado: ' + msg, ok ? 'ok' : 'err');
     b.title = msg;
     b.textContent = ok ? '✓' : '!';
@@ -914,7 +915,12 @@
   const saveRead = () => chrome.storage.local.set({ wamRead: [...readIds].slice(-500) });
   // el servidor es la fuente de verdad (n.leida); readIds es solo la marca local hasta que el servidor confirma
   const isRead = (n) => !!n.leida || readIds.has(n.id);
-  const unreadList = () => notifs.filter((n) => !isRead(n));
+  // aviso «Nueva actualización»: lo genera la propia extensión cuando GitHub tiene una versión mayor que la instalada
+  let updNotif = null;
+  const REPO_URL = 'https://github.com/dirlant/whatsapp-regestion';
+  const ZIP_URL = REPO_URL + '/archive/refs/heads/main.zip';
+  const allNotifs = () => (updNotif ? [updNotif, ...notifs] : notifs);
+  const unreadList = () => allNotifs().filter((n) => !isRead(n));
   const safeUrl = (u) => (/^https?:\/\//i.test(String(u || '')) ? String(u) : '');
   const fmtAviso = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); };
 
@@ -942,10 +948,10 @@
     }
     try { chrome.runtime.sendMessage({ type: 'wam-badge', count: un.length, urgent }); } catch {}
 
-    $('#wam-avinfo').textContent = notifs.length ? notifs.length + ' aviso(s) · ' + un.length + ' sin leer' : 'Sin avisos.';
+    $('#wam-avinfo').textContent = allNotifs().length ? allNotifs().length + ' aviso(s) · ' + un.length + ' sin leer' : 'Sin avisos.';
     const box = $('#wam-avlist');
     box.innerHTML = '';
-    [...notifs].sort((a, b) => (isRead(a) ? 1 : 0) - (isRead(b) ? 1 : 0)).forEach((n) => {
+    [...allNotifs()].sort((a, b) => (isRead(a) ? 1 : 0) - (isRead(b) ? 1 : 0)).forEach((n) => {
       const leido = isRead(n);
       const card = document.createElement('div');
       card.className = 'wam-aviso ' + n.tipo + (leido ? ' read' : '');
@@ -965,7 +971,7 @@
       const url = safeUrl(n.link);
       if (url) {
         const l = document.createElement('a');
-        l.href = url; l.target = '_blank'; l.rel = 'noopener noreferrer'; l.textContent = 'Abrir enlace';
+        l.href = url; l.target = '_blank'; l.rel = 'noopener noreferrer'; l.textContent = String(n.id).startsWith('upd-') ? 'Descargar actualización' : 'Abrir enlace';
         card.appendChild(l);
       }
       if (!leido) {
@@ -1015,9 +1021,25 @@
     ids.forEach((id) => readIds.add(id));
     saveRead();
     renderNotifs();
-    for (const id of ids) await fetchNotifs(true, id);
+    for (const id of ids) if (!String(id).startsWith('upd-')) await fetchNotifs(true, id); // el aviso de actualización es local: no existe en el servidor
   };
-  $('#wam-avrefresh').onclick = () => fetchNotifs(true);
+  // ----- actualizaciones: compara la versión instalada con la publicada en GitHub -----
+  const verNum = (v) => String(v || '0').split('.').map((x) => parseInt(x, 10) || 0);
+  const verMayor = (a, b) => { const x = verNum(a), y = verNum(b); for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d > 0; } return false; };
+  const checkUpdate = async () => {
+    const r = await new Promise((resolve) => chrome.runtime.sendMessage({ type: 'wam-update' }, (x) => resolve(x || {})));
+    const actual = chrome.runtime.getManifest().version;
+    const nueva = r.version && verMayor(r.version, actual) ? r.version : '';
+    updNotif = nueva ? { id: 'upd-' + nueva, tipo: 'importante', titulo: 'Nueva actualización', mensaje: 'Hay una nueva versión de Creatuchat (' + nueva + '; tienes la ' + actual + '). Descárgala desde el repositorio de GitHub, descomprime el ZIP y, en chrome://extensions, recarga la extensión (o reemplaza la carpeta anterior).', link: ZIP_URL, fecha: new Date().toISOString(), leida: false } : null;
+    const dl = $('#wam-dl');
+    dl.classList.toggle('nuevo', !!nueva);
+    dl.title = nueva ? 'Nueva actualización disponible (' + nueva + '): descargar' : 'Descargar la última versión de la extensión (GitHub)';
+    renderNotifs();
+    return nueva;
+  };
+  setTimeout(() => checkUpdate(), 4000);
+  setInterval(() => checkUpdate(), NOTIF_EVERY_MS);
+  $('#wam-avrefresh').onclick = () => { fetchNotifs(true); checkUpdate(); };
   $('#wam-avreadall').onclick = () => markRead(unreadList().map((n) => n.id));
   setInterval(() => fetchNotifs(), NOTIF_EVERY_MS);
 

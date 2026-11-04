@@ -150,6 +150,9 @@ details label{display:flex;justify-content:space-between;align-items:center;marg
 body.dark ~ #wam-root .wam-dk,html.dark #wam-root .wam-dk{display:block!important}
 body.dark ~ #wam-root .wam-lt,html.dark #wam-root .wam-lt{display:none!important}
 .wam-reflic{padding:5px 9px;font-size:15px;line-height:1}
+.wam-reflic{text-decoration:none;display:inline-flex;align-items:center;position:relative}
+.wam-reflic.nuevo{border-color:var(--green);color:var(--green)}
+.wam-reflic.nuevo::after{content:'';position:absolute;top:-3px;right:-3px;width:9px;height:9px;border-radius:50%;background:#ea0038}
 .wam-reflic.spin{animation:wamspin .8s linear infinite;pointer-events:none}
 @keyframes wamspin{to{transform:rotate(360deg)}}
 .wam-aboutbtn{border:1px solid var(--line);background:var(--input);color:var(--text);border-radius:14px;padding:5px 12px;font:inherit;font-size:13px;cursor:pointer}
