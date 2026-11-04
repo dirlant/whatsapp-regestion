@@ -82,7 +82,7 @@
   root.id = 'wam-root';
   root.innerHTML = `
   <div id="wam-panel" hidden>
-    <div class="wam-head"><img id="wam-logo" class="wam-lt" alt=""><img id="wam-logo-d" class="wam-dk" alt=""><div class="wam-title" title="Envíos masivos"><img id="wam-word" class="wam-wd wam-lt" alt="Creatuchat"><img id="wam-word-d" class="wam-wd wam-dk" alt="Creatuchat"></div><button id="wam-bell" class="wam-bell" title="Avisos"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><b id="wam-avibadge" class="wam-badge" hidden></b></button><button id="wam-about" class="wam-aboutbtn" title="Estado y licencia">Acerca</button><button id="wam-close" title="Cerrar">×</button></div>
+    <div class="wam-head"><img id="wam-logo" class="wam-lt" alt=""><img id="wam-logo-d" class="wam-dk" alt=""><div class="wam-title" title="Envíos masivos"><img id="wam-word" class="wam-wd wam-lt" alt="Creatuchat"><img id="wam-word-d" class="wam-wd wam-dk" alt="Creatuchat"></div><button id="wam-bell" class="wam-bell" title="Avisos"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><b id="wam-avibadge" class="wam-badge" hidden></b></button><button id="wam-reflic" class="wam-aboutbtn wam-reflic" title="Actualizar: revisa el estado de tu licencia y tus permisos (como la IA)">↻</button><button id="wam-about" class="wam-aboutbtn" title="Estado y licencia">Acerca</button><button id="wam-close" title="Cerrar">×</button></div>
     <div id="wam-avibox" hidden>
       <div class="wam-avihead"><b>Avisos</b></div>
       <div class="wam-sum"><span id="wam-avinfo">Sin avisos.</span>
@@ -303,6 +303,23 @@
   $('#wam-aboutver').textContent = chrome.runtime.getManifest().version;
   // un solo desplegable abierto a la vez: avisos (campanita) o "Acerca"
   const abrirAvisos = () => { $('#wam-aboutbox').hidden = true; $('#wam-avibox').hidden = false; renderNotifs(); fetchNotifs(true); };
+  // revisa de nuevo la licencia y los permisos (IA incluida) sin recargar la página
+  $('#wam-reflic').onclick = async () => {
+    const b = $('#wam-reflic');
+    if (b.disabled) return;
+    b.disabled = true; b.classList.add('spin');
+    const ia0 = !!(lic.valid && lic.ia);
+    let ok = false;
+    try { ok = await checkLicense(); } catch {}
+    b.classList.remove('spin'); b.disabled = false;
+    const ia1 = !!(lic.valid && lic.ia);
+    const msg = !lic.token ? 'Sin licencia: ingresa tu token.' : !ok ? (lic.reason || 'Licencia no válida.') : 'Licencia al día hasta ' + lic.until + ' · IA ' + (ia1 ? 'habilitada' : 'no incluida') + (ia1 !== ia0 ? ' (cambió)' : '');
+    log('Actualizado: ' + msg, ok ? 'ok' : 'err');
+    b.title = msg;
+    b.textContent = ok ? '✓' : '!';
+    setTimeout(() => { b.textContent = '↻'; b.title = 'Actualizar: revisa el estado de tu licencia y tus permisos (como la IA)'; }, 2500);
+    setStats(msg);
+  };
   $('#wam-about').onclick = () => { const b = $('#wam-aboutbox'); $('#wam-avibox').hidden = true; b.hidden = !b.hidden; };
   $('#wam-bell').onclick = () => { if ($('#wam-avibox').hidden) abrirAvisos(); else $('#wam-avibox').hidden = true; };
   panel.addEventListener('click', (e) => {
