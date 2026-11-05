@@ -211,3 +211,13 @@ details.wam-more>.wam-hint{margin:2px 0 4px}
 .wam-paso .wam-seg-mini button{padding:3px 4px;font-size:12px}
 .wam-paso-cab a{position:static;margin-left:auto;color:var(--err);cursor:pointer;font-size:18px}
 .wam-paso-img{display:block;max-width:100%;max-height:130px;margin:6px 0;border-radius:8px;object-fit:contain;background:#0001}
+
+/* encabezado compacto: logo más pequeño y todos los botones (incluida la X de cerrar) siempre visibles */
+.wam-head{gap:6px;padding:8px 10px}
+.wam-head img#wam-logo,.wam-head img#wam-logo-d{width:28px;height:28px;flex:none}
+.wam-title{flex:1 1 0;min-width:0;overflow:hidden}
+.wam-head .wam-wd{height:15px;width:auto;max-width:100%;object-fit:contain}
+.wam-head .wam-aboutbtn{padding:4px 8px;font-size:12px;flex:none;white-space:nowrap}
+.wam-head .wam-reflic{padding:4px 7px;font-size:14px}
+.wam-bell{flex:none;margin-right:0}
+#wam-close{flex:none;font-size:26px;padding:0 4px}
