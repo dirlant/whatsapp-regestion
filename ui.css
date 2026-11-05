@@ -76,6 +76,7 @@ details label{display:flex;justify-content:space-between;align-items:center;marg
 .wam-tabbar{margin:10px 14px 0;flex:0 0 auto}
 .wam-tabbar button{font-size:14px;padding:7px 4px}
 .wam-subbar{margin:8px 14px 0;flex:0 0 auto}
+.wam-iahead{margin:0 14px;flex:0 0 auto}
 .wam-subbar button{font-size:13px;padding:6px 4px}
 
 .wam-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}

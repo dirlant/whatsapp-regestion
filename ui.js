@@ -116,6 +116,11 @@
       <button data-tab="auto" class="on">Envío Automático</button>
       <button data-tab="ia">Envío con IA</button>
     </div>
+    <div class="wam-subbar wam-seg" id="wam-iasubbar" hidden>
+      <button data-isub="cfg" class="on">Configuración</button>
+      <button data-isub="tr">Entrenamientos</button>
+      <button data-isub="met">Métricas</button>
+    </div>
     <div class="wam-subbar wam-seg" id="wam-subbar">
       <button data-sub="env" class="on">Envío</button>
       <button data-sub="msg">Mensajes</button>
@@ -223,11 +228,14 @@
       </div>
     </div>
 
-    <div class="wam-body" data-body="ia" hidden>
-      <h4>Respuestas con IA</h4>
+    <div id="wam-iahead" class="wam-iahead" hidden>
+      <div id="wam-iawarn" class="wam-notice bad" hidden></div>
+      <div id="wam-iastatus" class="wam-hint">IA apagada.</div>
+    </div>
+
+    <div class="wam-body" data-body="iacfg" hidden>
+      <h4>Configuración</h4>
       <div class="wam-card">
-        <div id="wam-iawarn" class="wam-notice bad" hidden></div>
-        <div id="wam-iastatus" class="wam-hint">IA apagada.</div>
 
         <p class="wam-hint">La IA responde sola y enseguida (unos 3 segundos), respetando el horario y el límite diario. Las pausas largas son solo para los envíos masivos.</p>
 
@@ -267,11 +275,6 @@
           <div id="wam-ialabels" class="wam-list"></div>
         </div>
 
-        <div class="wam-hint" style="margin-top:10px"><b>Entrenamiento de la IA</b></div>
-        <textarea id="iaInstr" rows="6" maxlength="3000" placeholder="Qué vendes o qué servicio das, tono, precios, horarios, qué NO debe hacer… La IA solo usa esta información; si no está aquí, pasa el chat a una persona."></textarea>
-        <div id="wam-iatrain" class="wam-notice" hidden>Tienes cambios sin aplicar. La IA sigue respondiendo con el entrenamiento anterior hasta que pulses «Actualizar IA».</div>
-        <button id="wam-iaupdate" class="wam-btn" disabled>Actualizar IA</button>
-
         <div class="wam-hint" style="margin-top:10px"><b>Horario de trabajo</b></div>
         <label class="wam-sw"><span>Responder solo dentro del horario</span><input type="checkbox" id="iaHorarioOn"><i></i></label>
         <label>Hora de inicio <span><input type="time" id="iaInicio"></span></label>
@@ -281,7 +284,30 @@
         <button id="wam-iareset" class="wam-btn alt danger">Reiniciar IA (empezar de cero)</button>
         <p class="wam-hint">Reiniciar borra lo que la IA recuerda: qué chats ya atendió, cuáles tenía en atención, a quién ya le envió los pasos y la lista «Necesitan a una persona». Tu configuración (palabras, pasos, etiquetas, entrenamiento, horario) se conserva.</p>
       </div>
+    </div>
 
+    <div class="wam-body" data-body="iatr" hidden>
+      <h4>Entrenamiento de la IA</h4>
+      <div class="wam-card">
+        <p class="wam-hint">Cuéntale a la IA qué vendes o qué servicio das, tu tono, precios y horarios, y qué NO debe hacer. Solo usa esta información.</p>
+        <textarea id="iaInstr" rows="6" maxlength="3000" placeholder="Qué vendes o qué servicio das, tono, precios, horarios, qué NO debe hacer… La IA solo usa esta información; si no está aquí, pasa el chat a una persona."></textarea>
+        <div id="wam-iatrain" class="wam-notice" hidden>Tienes cambios sin aplicar. La IA sigue respondiendo con el entrenamiento anterior hasta que pulses «Actualizar IA».</div>
+        <button id="wam-iaupdate" class="wam-btn" disabled>Actualizar IA</button>
+      </div>
+    </div>
+
+    <div class="wam-body" data-body="iamet" hidden>
+      <h4>Métricas · Resumen</h4>
+      <div class="wam-card">
+        <div class="wam-kpis">
+          <div><b id="ik-state">–</b><span>Estado</span></div>
+          <div><b id="ik-today">0</b><span>Respuestas hoy</span></div>
+          <div><b id="ik-total">0</b><span>Respuestas en total</span></div>
+          <div><b id="ik-steps">0</b><span>Pasos enviados hoy</span></div>
+          <div><b id="ik-chats">0</b><span>Chats en atención</span></div>
+          <div><b id="ik-human">0</b><span>Necesitan persona</span></div>
+        </div>
+      </div>
       <h4>Necesitan a una persona</h4>
       <div class="wam-card"><div id="wam-iahuman" class="wam-list small">Ninguno.</div></div>
     </div>
@@ -336,19 +362,26 @@
   });
   // dos secciones (Envío Automático / Envío con IA); la primera tiene pestañas internas: Envío, Mensajes y Métricas
   let wamSub = 'env'; // pestaña interna activa del envío automático
+  let wamIaSub = 'cfg'; // pestaña interna activa del envío con IA: cfg | tr | met
   let wamSec = 'auto';
   const showView = () => {
-    const view = wamSec === 'ia' ? 'ia' : wamSub;
+    const enIa = wamSec === 'ia';
+    const view = enIa ? 'ia' + wamIaSub : wamSub;
     panel.querySelectorAll('.wam-tabbar button').forEach((x) => x.classList.toggle('on', x.dataset.tab === wamSec));
     panel.querySelectorAll('#wam-subbar button').forEach((x) => x.classList.toggle('on', x.dataset.sub === wamSub));
-    $('#wam-subbar').hidden = wamSec === 'ia';
+    panel.querySelectorAll('#wam-iasubbar button').forEach((x) => x.classList.toggle('on', x.dataset.isub === wamIaSub));
+    $('#wam-subbar').hidden = enIa;
+    $('#wam-iasubbar').hidden = !enIa;
+    $('#wam-iahead').hidden = !enIa;
     panel.querySelectorAll('[data-body]').forEach((d) => (d.hidden = d.dataset.body !== view));
     if (view === 'met') renderMetrics();
-    if (view === 'ia') { renderIaLabels(); renderIaSug(); renderIaHuman(); }
+    if (view === 'iacfg') renderIaLabels();
+    if (enIa) { renderIaSug(); renderIaHuman(); }
     $('#wam-foot-bulk').hidden = !(view === 'env' || view === 'msg'); // botones del envío masivo
-    $('#wam-foot-ia').hidden = view !== 'ia'; // botones de la IA
+    $('#wam-foot-ia').hidden = !enIa; // botones de la IA
   };
   panel.querySelectorAll('.wam-tabbar button').forEach((x) => { x.onclick = () => { wamSec = x.dataset.tab; showView(); }; });
+  panel.querySelectorAll('#wam-iasubbar button').forEach((x) => { x.onclick = () => { wamIaSub = x.dataset.isub; wamSec = 'ia'; showView(); }; });
   panel.querySelectorAll('#wam-subbar button').forEach((x) => { x.onclick = () => { wamSub = x.dataset.sub; wamSec = 'auto'; showView(); }; });
   chrome.runtime.onMessage.addListener((m) => {
     if (m && m.type === 'wam-toggle') { panel.hidden = !panel.hidden; if (!panel.hidden) refreshData(); }
@@ -1757,7 +1790,17 @@
       box.appendChild(card);
     });
   };
+  const renderIaMetrics = () => {
+    const hoy = iaDay();
+    $('#ik-state').textContent = cfg.ia.on ? (iaEditando() ? 'Editando' : 'Activa') : 'Pausada';
+    $('#ik-today').textContent = iaToday();
+    $('#ik-total').textContent = iaCount.total || 0;
+    $('#ik-steps').textContent = Object.values(iaPasosT).filter((t) => dayKey(t) === hoy).length;
+    $('#ik-chats').textContent = Object.keys(iaEngaged).length;
+    $('#ik-human').textContent = iaHuman.length;
+  };
   const renderIaHuman = () => {
+    renderIaMetrics();
     const box = $('#wam-iahuman');
     box.innerHTML = '';
     if (!iaHuman.length) { box.textContent = 'Ninguno.'; return; }
@@ -1954,7 +1997,7 @@
           // automático: responde enseguida (el cliente está en plena conversación; las pausas son solo para envíos masivos)
           try {
             await iaDeliver(c, d.respuesta, d.etiqueta_id);
-            iaCount = { day: iaDay(), n: iaToday() + 1 };
+            iaCount = { day: iaDay(), n: iaToday() + 1, total: (iaCount.total || 0) + 1 };
             log('✓ IA respondió a ' + c.name, 'ok');
           } catch (e) {
             iaAddHuman(c, 'No se pudo enviar la respuesta: ' + e.message, last.t);
@@ -2023,11 +2066,11 @@
   $('#iaInicio').onchange = (e) => { if (iaMin(e.target.value) !== null) cfg.ia.inicio = e.target.value; else e.target.value = cfg.ia.inicio; iaHorarioCambio(); };
   $('#iaCierre').onchange = (e) => { if (iaMin(e.target.value) !== null) cfg.ia.cierre = e.target.value; else e.target.value = cfg.ia.cierre; iaHorarioCambio(); };
   // cualquier cambio en la configuración de la IA la pone en pausa un momento (el botón Pausar IA no cambia: sigue siendo la pausa manual)
-  ['input', 'change', 'click'].forEach((ev) => panel.querySelector('[data-body="ia"]').addEventListener(ev, (e) => {
+  ['input', 'change', 'click'].forEach((ev) => panel.querySelectorAll('[data-body="iacfg"], [data-body="iatr"]').forEach((el) => el.addEventListener(ev, (e) => {
     if (ev === 'click' && !e.target.closest('#wam-iakwbox, #wam-iamodos, #wam-ialabels-box, #wam-iaupdate, .wam-seg')) return;
     if (e.target.closest('#wam-ianow')) return;
     iaHold();
-  }, true));
+  }, true)));
   $('#iaInstr').oninput = (e) => { cfg.ia.instrucciones = e.target.value.slice(0, 3000); save(); renderIaTrain(); };
   $('#wam-iaupdate').onclick = () => {
     if (!iaTrainDirty()) return;
