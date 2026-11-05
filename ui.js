@@ -113,9 +113,13 @@
     <div id="wam-avbar" class="wam-avbar" hidden></div>
 
     <div class="wam-tabbar wam-seg">
-      <button data-tab="env" class="on">Envío</button>
-      <button data-tab="msg">Mensajes</button>
-      <button data-tab="ia">IA</button>
+      <button data-tab="auto" class="on">Envío Automático</button>
+      <button data-tab="ia">Envío con IA</button>
+    </div>
+    <div class="wam-subbar wam-seg" id="wam-subbar">
+      <button data-sub="env" class="on">Envío</button>
+      <button data-sub="msg">Mensajes</button>
+      <button data-sub="met">Métricas</button>
     </div>
 
     <div class="wam-body" data-body="env">
@@ -181,6 +185,9 @@
         <div id="wam-log"></div>
       </div>
 
+    </div>
+
+    <div class="wam-body" data-body="met" hidden>
       <h4>Métricas · Resumen</h4>
       <div class="wam-card">
         <div class="wam-kpis">
@@ -327,16 +334,22 @@
     if (!e.target.closest('#wam-aboutbox, #wam-about')) $('#wam-aboutbox').hidden = true;
     if (!e.target.closest('#wam-avibox, #wam-bell, #wam-avbar')) $('#wam-avibox').hidden = true;
   });
-  panel.querySelectorAll('.wam-tabbar button').forEach((b) => {
-    b.onclick = () => {
-      panel.querySelectorAll('.wam-tabbar button').forEach((x) => x.classList.toggle('on', x === b));
-      panel.querySelectorAll('[data-body]').forEach((d) => (d.hidden = d.dataset.body !== b.dataset.tab));
-      if (b.dataset.tab === 'env') renderMetrics();
-      if (b.dataset.tab === 'ia') { renderIaLabels(); renderIaSug(); renderIaHuman(); }
-      $('#wam-foot-bulk').hidden = !(b.dataset.tab === 'env' || b.dataset.tab === 'msg'); // botones del envío masivo
-      $('#wam-foot-ia').hidden = b.dataset.tab !== 'ia'; // botones de la IA
-    };
-  });
+  // dos secciones (Envío Automático / Envío con IA); la primera tiene pestañas internas: Envío, Mensajes y Métricas
+  let wamSub = 'env'; // pestaña interna activa del envío automático
+  let wamSec = 'auto';
+  const showView = () => {
+    const view = wamSec === 'ia' ? 'ia' : wamSub;
+    panel.querySelectorAll('.wam-tabbar button').forEach((x) => x.classList.toggle('on', x.dataset.tab === wamSec));
+    panel.querySelectorAll('#wam-subbar button').forEach((x) => x.classList.toggle('on', x.dataset.sub === wamSub));
+    $('#wam-subbar').hidden = wamSec === 'ia';
+    panel.querySelectorAll('[data-body]').forEach((d) => (d.hidden = d.dataset.body !== view));
+    if (view === 'met') renderMetrics();
+    if (view === 'ia') { renderIaLabels(); renderIaSug(); renderIaHuman(); }
+    $('#wam-foot-bulk').hidden = !(view === 'env' || view === 'msg'); // botones del envío masivo
+    $('#wam-foot-ia').hidden = view !== 'ia'; // botones de la IA
+  };
+  panel.querySelectorAll('.wam-tabbar button').forEach((x) => { x.onclick = () => { wamSec = x.dataset.tab; showView(); }; });
+  panel.querySelectorAll('#wam-subbar button').forEach((x) => { x.onclick = () => { wamSub = x.dataset.sub; wamSec = 'auto'; showView(); }; });
   chrome.runtime.onMessage.addListener((m) => {
     if (m && m.type === 'wam-toggle') { panel.hidden = !panel.hidden; if (!panel.hidden) refreshData(); }
   });
@@ -727,7 +740,7 @@
     sendLog.push({ t: Date.now(), ...e });
     if (sendLog.length > MAX_LOG) sendLog = sendLog.slice(-MAX_LOG);
     chrome.storage.local.set({ wamLog: sendLog });
-    if (!$('[data-body="env"]').hidden) renderMetrics();
+    if (!$('[data-body="met"]').hidden) renderMetrics();
   };
   const dayKey = (t) => { const d = new Date(t); return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); };
   const renderMetrics = () => {
@@ -837,7 +850,7 @@
     const tab = panel.querySelector('[data-tab="ia"]');
     if (tab) {
       tab.hidden = !permitido;
-      if (!permitido && tab.classList.contains('on')) { const env = panel.querySelector('[data-tab="env"]'); if (env) env.click(); }
+      if (!permitido && tab.classList.contains('on')) { const auto = panel.querySelector('[data-tab="auto"]'); if (auto) auto.click(); }
     }
     if (!permitido && lic.token && !lic.checking && cfg.ia && cfg.ia.on) {
       cfg.ia.on = false; save(); // sin permiso la IA se apaga sola

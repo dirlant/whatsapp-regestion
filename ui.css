@@ -75,6 +75,8 @@ details label{display:flex;justify-content:space-between;align-items:center;marg
 .wam-msg a{position:absolute;top:6px;right:10px;color:var(--err);cursor:pointer;font-size:18px}
 .wam-tabbar{margin:10px 14px 0;flex:0 0 auto}
 .wam-tabbar button{font-size:14px;padding:7px 4px}
+.wam-subbar{margin:8px 14px 0;flex:0 0 auto}
+.wam-subbar button{font-size:13px;padding:6px 4px}
 
 .wam-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .wam-kpis div{background:var(--input);border-radius:10px;padding:8px 6px;text-align:center}
