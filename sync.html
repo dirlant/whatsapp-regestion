@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sincronizar Creatuchat</title>
+<style>
+  :root { --bg:#f0f2f5; --card:#fff; --text:#111b21; --sub:#667781; --line:#e9edef; --green:#00a884; --err:#ea0038; --pink:#e6177a; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0b141a; --card:#111b21; --text:#e9edef; --sub:#8696a0; --line:#222d34; --err:#f15c6d; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui, "Segoe UI", sans-serif; }
+  main { max-width:560px; margin:0 auto; padding:28px 16px 48px; }
+  h1 { font-size:22px; margin:0 0 4px; } h1 b { color:var(--pink); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin-top:14px; }
+  .sub { color:var(--sub); font-size:13px; margin:2px 0 0; }
+  button { font:inherit; font-weight:600; border:0; border-radius:10px; padding:10px 16px; cursor:pointer; background:var(--green); color:#fff; }
+  button.alt { background:transparent; color:var(--text); border:1px solid var(--line); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  #log { margin-top:12px; font:13px/1.55 ui-monospace, Consolas, monospace; max-height:280px; overflow:auto; white-space:pre-wrap; }
+  #log .err { color:var(--err); } #log .ok { color:var(--green); }
+  a { color:var(--green); }
+</style>
+</head>
+<body>
+<main>
+  <h1><b>CREA</b>TUCHAT · Sincronizar</h1>
+  <p class="sub">Actualiza los archivos de la extensión desde GitHub, sin descargar ni descomprimir un ZIP.</p>
+
+  <div class="card">
+    <div>Versión instalada: <b id="ver">–</b></div>
+    <div class="sub" id="carpeta">Carpeta de la extensión: aún no elegida.</div>
+    <div class="row">
+      <button id="elegir" class="alt">Elegir carpeta de la extensión</button>
+      <button id="sync" disabled>Sincronizar ahora</button>
+    </div>
+    <p class="sub">La primera vez, elige la carpeta donde descomprimiste la extensión (la misma que cargaste en <code>chrome://extensions</code>). Chrome te pedirá permiso para escribir en ella; solo se modifican los archivos de la extensión.</p>
+    <div id="log"></div>
+  </div>
+
+  <p class="sub">¿Prefieres hacerlo a mano? <a href="https://github.com/dirlant/whatsapp-regestion/archive/refs/heads/main.zip" target="_blank" rel="noopener noreferrer">Descargar el ZIP</a></p>
+</main>
+<script src="sync.js"></script>
+</body>
+</html>

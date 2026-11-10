@@ -77,3 +77,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, send) => {
     .catch((e) => send({ error: e.message }));
   return true;
 });
+
+// Abre la página de sincronización (archivos de la extensión desde GitHub)
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg && msg.type === 'wam-open-sync') chrome.tabs.create({ url: chrome.runtime.getURL('sync.html') });
+});

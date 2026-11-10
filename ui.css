@@ -226,3 +226,5 @@ details.wam-more>.wam-hint{margin:2px 0 4px}
 #wam-close{flex:none;font-size:26px;padding:0 4px}
 
 .wam-subbar button{font-size:12px;padding:6px 2px}
+
+.wam-head #wam-dl{font-size:12px;padding:4px 8px;white-space:nowrap}
