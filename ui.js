@@ -338,7 +338,7 @@
 
     <div id="wam-foot-bulk" class="wam-foot">
       <div id="wam-hint-bulk" class="wam-notice bad wam-span" hidden>La IA está en marcha: el envío masivo está bloqueado. Pausa la IA (pestaña IA) para usarlo. Solo puede funcionar una de las dos a la vez.</div>
-      <button id="wam-start" class="wam-btn big">Iniciar envío</button>
+      <button id="wam-start" class="wam-btn big">INICIAR ENVÍO</button>
       <button id="wam-pause" class="wam-btn alt">Pausar</button>
       <button id="wam-stop" class="wam-btn alt danger">Detener</button>
     </div>
