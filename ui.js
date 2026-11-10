@@ -73,6 +73,7 @@
     hourTo: 20,
     source: 'label',
     cc: '',
+    nums: '',
     ia: { on: false, mode: 'auto', scope: 'etiquetas', modos: { etiquetas: true, palabras: false, todos: false, nuevos: false, noLeidos: false }, pasos: {}, labels: [], instrucciones: '', maxDia: 100, horas: 0, instrAplicadas: '', horarioOn: true, inicio: '08:00', cierre: '20:00', palabras: '', kwExtra: false, consent: false },
     messages: [...EXAMPLE_MSGS],
     kw: { on: false, palabras: '', pasos: {} },
@@ -154,10 +155,17 @@
         <div class="wam-seg" id="wam-source">
           <button data-src="label" class="on">Por etiqueta</button>
           <button data-src="excel">Por Excel</button>
+          <button data-src="numeros" title="Por número (manual)">Manual</button>
         </div>
         <div id="wam-pane-label">
           <div id="wam-llist" class="wam-list"></div>
           <div id="wam-lblsum" class="wam-hint"></div>
+        </div>
+        <div id="wam-pane-numeros" hidden>
+          <p class="wam-hint"><b>Por número (manual).</b> Escribe un número o varios separados por comas («,»). Puedes incluir el código de país o indicarlo abajo.</p>
+          <textarea id="wam-nums" rows="3" placeholder="Ej: 56912345678, 573001234567, 5491122334455"></textarea>
+          <label>Código de país (opcional) <input type="number" id="wam-ncc" placeholder="56"></label>
+          <div id="wam-nsum" class="wam-notice"></div>
         </div>
         <div id="wam-pane-excel" hidden>
           <p class="wam-hint">Sube un Excel (.xlsx, .xls o .csv) con una columna de nombre y otra de teléfono. Las demás columnas sirven para personalizar el mensaje.</p>
@@ -546,6 +554,7 @@
     };
     // un solo origen a la vez: etiquetas o Excel, nunca los dos
     if (cfg.source === 'excel') buildExcel().forEach(push);
+    else if (cfg.source === 'numeros') buildNums().forEach(push);
     else selected.forEach((id) => (labelChats.get(id) || []).forEach(push));
     renderRecipients();
   };
@@ -576,8 +585,26 @@
     excel.stats = { invalid, dup, total: excel.rows.length, valid: out.length };
     return out;
   };
+  // ----- origen «Por número»: uno o varios números separados por comas, punto y coma o saltos de línea -----
+  let numsStats = null;
+  const buildNums = () => {
+    const out = [], seen = new Set();
+    let invalid = 0, dup = 0;
+    const cc = String(cfg.cc || '');
+    String(cfg.nums || '').split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean).forEach((raw) => {
+      let digits = raw.replace(/\D/g, '').replace(/^0+/, '');
+      if (cc && digits && digits.length <= 10 && !digits.startsWith(cc)) digits = cc + digits; // número local sin código de país
+      if (digits.length < 8 || digits.length > 15) { invalid++; return; }
+      if (seen.has(digits)) { dup++; return; }
+      seen.add(digits);
+      out.push({ id: digits + '@c.us', name: '', vars: { nombre: '', telefono: digits } });
+    });
+    numsStats = { valid: out.length, invalid, dup };
+    return out;
+  };
   // variables que se pueden usar en el mensaje según el origen elegido
   const varKeys = () => {
+    if (cfg.source === 'numeros') return ['nombre', 'telefono'];
     if (cfg.source !== 'excel') return ['nombre'];
     return [...new Set(['nombre', 'telefono', ...excel.headers.map(norm).filter(Boolean)])];
   };
@@ -587,6 +614,9 @@
     const sum = [...selected].reduce((n, id) => n + (labelChats.get(id) || []).length, 0);
     $('#wam-lblsum').textContent = selected.size
       ? `${selected.size} etiqueta(s): ${sum} contactos` + (sum !== recipients.length ? ` · ${recipients.length} en total sin repetir` : '')
+      : '';
+    $('#wam-nsum').textContent = cfg.source === 'numeros' && numsStats
+      ? numsStats.valid + ' número(s) válido(s)' + (numsStats.invalid ? ' · ' + numsStats.invalid + ' no válido(s) (8 a 15 dígitos)' : '') + (numsStats.dup ? ' · ' + numsStats.dup + ' repetido(s)' : '')
       : '';
     const st = excel.stats;
     $('#wam-xsum').textContent = st
@@ -612,6 +642,7 @@
     $('#wam-filename').textContent = 'Elegir archivo…';
     $('#wam-xmap').hidden = true;
   };
+  const clearNums = () => { cfg.nums = ''; numsStats = null; $('#wam-nums').value = ''; };
   const clearLabels = () => {
     selected.clear();
     $('#wam-llist').querySelectorAll('input').forEach((i) => (i.checked = false));
@@ -620,25 +651,30 @@
     excluded.clear();
     clearLabels();
     clearExcel();
+    clearNums();
+    save();
     rebuild();
   };
 
   // selector de origen: Por etiqueta / Por Excel (excluyentes)
   const applySource = () => {
-    const ex = cfg.source === 'excel';
-    panel.querySelectorAll('#wam-source button').forEach((b) => b.classList.toggle('on', (b.dataset.src === 'excel') === ex));
-    $('#wam-pane-label').hidden = ex;
-    $('#wam-pane-excel').hidden = !ex;
-    $('#wam-refresh').hidden = ex;
+    panel.querySelectorAll('#wam-source button').forEach((b) => b.classList.toggle('on', b.dataset.src === cfg.source));
+    $('#wam-pane-label').hidden = cfg.source !== 'label';
+    $('#wam-pane-excel').hidden = cfg.source !== 'excel';
+    $('#wam-pane-numeros').hidden = cfg.source !== 'numeros';
+    $('#wam-refresh').hidden = cfg.source !== 'label';
+    $('#wam-nums').value = cfg.nums || '';
+    $('#wam-ncc').value = cfg.cc || '';
     rebuild();
   };
   panel.querySelectorAll('#wam-source button').forEach((b) => {
     b.onclick = () => {
       if (b.dataset.src === cfg.source) return;
-      if ((selected.size || excel.rows.length) && !confirm('Cambiar de origen quitará la selección actual. ¿Continuar?')) return;
+      if ((selected.size || excel.rows.length || String(cfg.nums || '').trim()) && !confirm('Cambiar de origen quitará la selección actual. ¿Continuar?')) return;
       excluded.clear();
       clearLabels();
       clearExcel();
+      clearNums();
       cfg.source = b.dataset.src;
       save();
       applySource();
@@ -703,6 +739,8 @@
   $('#wam-file').onchange = (e) => { if (e.target.files[0]) loadFile(e.target.files[0]); };
   $('#wam-colname').onchange = (e) => { excel.colName = +e.target.value; rebuild(); };
   $('#wam-colphone').onchange = (e) => { excel.colPhone = +e.target.value; rebuild(); };
+  $('#wam-nums').oninput = (e) => { cfg.nums = e.target.value.slice(0, 20000); save(); rebuild(); };
+  $('#wam-ncc').onchange = (e) => { cfg.cc = e.target.value.replace(/\D/g, ''); e.target.value = cfg.cc; $('#wam-cc').value = cfg.cc; save(); rebuild(); };
   $('#wam-cc').onchange = (e) => { cfg.cc = e.target.value.replace(/\D/g, ''); e.target.value = cfg.cc; save(); rebuild(); };
 
   // formato de ejemplo descargable
@@ -2279,7 +2317,8 @@
       cfg.messages = Array.isArray(backup) && backup.some((m) => String(m).trim() && m !== OLD_DEFAULT_MSG) ? backup : [...EXAMPLE_MSGS];
       save();
     }
-    if (cfg.source !== 'excel') cfg.source = 'label';
+    if (cfg.source !== 'excel' && cfg.source !== 'numeros') cfg.source = 'label';
+    if (typeof cfg.nums !== 'string') cfg.nums = '';
     cfg.ia = { ...DEFAULTS.ia, ...(wamCfg && wamCfg.ia ? wamCfg.ia : {}) };
     cfg.ia.mode = 'auto'; // el modo sugerencia ya no existe
     cfg.kw = { ...DEFAULTS.kw, ...(wamCfg && wamCfg.kw ? wamCfg.kw : {}) };
