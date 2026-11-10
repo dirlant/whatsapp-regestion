@@ -20,6 +20,17 @@
     pending.delete(m.id);
     m.ok ? p.resolve(m.data) : p.reject(new Error(m.data));
   });
+  // Cualquier promesa rechazada sin manejar queda registrada en la pestaña Registro (en vez de ensuciar la consola).
+  // «Extension context invalidated» = la extensión se recargó/actualizó con esta página abierta: basta con recargar la página.
+  window.addEventListener('unhandledrejection', (e) => {
+    e.preventDefault();
+    const r = e.reason;
+    const msg = String((r && r.message) || r || 'error desconocido');
+    const texto = /Extension context invalidated/i.test(msg)
+      ? 'La extensión se recargó o actualizó con esta página abierta: recarga WhatsApp Web (Ctrl+Shift+R).'
+      : 'Error interno: ' + msg + (r && r.stack ? ' · ' + String(r.stack).split(String.fromCharCode(10)).slice(1, 2).join('').trim() : '');
+    try { log(texto, 'err'); } catch {}
+  });
   const call = (action, payload) =>
     new Promise((resolve, reject) => {
       const id = ++seq;
@@ -64,6 +75,7 @@
     cc: '',
     ia: { on: false, mode: 'auto', scope: 'etiquetas', modos: { etiquetas: true, palabras: false, todos: false, nuevos: false, noLeidos: false }, pasos: {}, labels: [], instrucciones: '', maxDia: 100, horas: 0, instrAplicadas: '', horarioOn: true, inicio: '08:00', cierre: '20:00', palabras: '', kwExtra: false, consent: false },
     messages: [...EXAMPLE_MSGS],
+    kw: { on: false, palabras: '', pasos: {} },
   };
   let cfg = { ...DEFAULTS };
   // los mensajes se guardan en el almacenamiento de la extensión y también en localStorage (copia de respaldo)
@@ -124,6 +136,7 @@
     <div class="wam-subbar wam-seg" id="wam-subbar">
       <button data-sub="env" class="on">Envío</button>
       <button data-sub="msg">Mensajes</button>
+      <button data-sub="kw">Palabras clave</button>
       <button data-sub="met">Métricas</button>
     </div>
 
@@ -228,6 +241,15 @@
       </div>
     </div>
 
+    <div class="wam-body" data-body="kw" hidden>
+      <h4>Respuestas por palabra clave</h4>
+      <div class="wam-card">
+        <div id="wam-kwstatus" class="wam-hint">Apagado: no responde a palabras clave.</div>
+        <p class="wam-hint">Sin IA: cuando un cliente te escribe una de estas palabras, se le envían automáticamente los pasos que definas (textos o imágenes), uno tras otro. Cada palabra tiene sus propios pasos. Solo puede funcionar esto o la IA, no las dos a la vez.</p>
+        <div id="wam-kwslot-kw"></div>
+      </div>
+    </div>
+
     <div id="wam-iahead" class="wam-iahead" hidden>
       <div id="wam-iawarn" class="wam-notice bad" hidden></div>
       <div id="wam-iastatus" class="wam-hint">IA apagada.</div>
@@ -248,23 +270,25 @@
           <label class="wam-sw"><span>Solo no leídos<small>Limita lo anterior a los chats con mensajes sin leer.</small></span><input type="checkbox" data-modo="noLeidos"><i></i></label>
         </div>
         <p class="wam-hint" id="wam-iamodohint"></p>
+        <div id="wam-kwslot-ia">
         <div id="wam-iakwbox">
-          <div class="wam-hint"><b>Palabras claves para activar al asistente</b></div>
+          <div class="wam-hint"><b id="wam-kwtitle">Palabras claves para activar al asistente</b></div>
           <div id="wam-kwchips" class="wam-chips"><input id="iaKwInput" placeholder="Escribe una palabra y pulsa Enter" autocomplete="off" maxlength="60"></div>
           <div id="wam-iapasos">
             <p class="wam-hint" id="wam-iapasos-vacio"><b>Pasos de cada palabra clave:</b> agrega una palabra arriba (o toca una que ya tengas) para decidir qué se envía primero —textos o imágenes— cuando un cliente la escriba, antes de que la IA empiece a responder.</p>
             <div id="wam-iapasos-cuerpo" hidden>
             <div class="wam-hint"><b id="wam-iapasos-tit">Pasos</b></div>
             <div class="wam-hint">Cada paso puede ser un <b>texto</b> o una <b>imagen</b> (con un texto opcional).</div>
-            <label class="wam-sw"><span>Enviar estos pasos primero<small>Cuando el cliente escriba esta palabra, se mandan en orden estos primeros pasos; solo después la IA empieza a responder.</small></span><input type="checkbox" id="iaPasosOn"><i></i></label>
+            <label class="wam-sw"><span>Enviar estos pasos primero<small id="wam-kwsw-small">Cuando el cliente escriba esta palabra, se mandan en orden estos primeros pasos; solo después la IA empieza a responder.</small></span><input type="checkbox" id="iaPasosOn"><i></i></label>
             <div id="wam-iapasos-lista"></div>
             <div class="wam-row"><button id="wam-iapaso-add" class="wam-btn alt">+ Agregar paso</button><button id="wam-iapaso-def" class="wam-btn alt">Pasos por defecto</button></div>
             <p class="wam-hint">Puedes usar <code>{nombre}</code> (nombre del contacto) y <code>{palabra}</code> (la palabra clave detectada), también en el texto que acompaña a una imagen. Las imágenes se reducen automáticamente para que se envíen rápido.</p>
             </div>
           </div>
           <details class="wam-more"><summary>Más información</summary>
-            <p class="wam-hint">Escribe una palabra o frase y pulsa <b>Enter</b> para agregarla; toca la × para quitarla; <b>toca una palabra</b> para configurar sus pasos (⚡ = tiene pasos activos). No distingue mayúsculas, minúsculas ni tildes («PRECIO», «Precio» y «precio» son lo mismo), y detecta la palabra aunque lleve más letras al final: «precio» también encuentra «precios». Desde que se activa en un chat, el asistente sigue la conversación aunque el cliente ya no use la palabra.</p>
+            <p class="wam-hint" id="wam-kwmore-p">Escribe una palabra o frase y pulsa <b>Enter</b> para agregarla; toca la × para quitarla; <b>toca una palabra</b> para configurar sus pasos (⚡ = tiene pasos activos). No distingue mayúsculas, minúsculas ni tildes («PRECIO», «Precio» y «precio» son lo mismo), y detecta la palabra aunque lleve más letras al final: «precio» también encuentra «precios». Desde que se activa en un chat, el asistente sigue la conversación aunque el cliente ya no use la palabra.</p>
           </details>
+        </div>
         </div>
         <details class="wam-more"><summary>Más información</summary>
           <p class="wam-hint">Al activarla busca los chats y, si falta tu respuesta (el último mensaje es del cliente), continúa la conversación, leído o no. Solo chats individuales (no grupos). Si una persona del equipo responde en un chat, la IA se aparta de ese chat 24 horas.</p>
@@ -317,6 +341,10 @@
       <button id="wam-start" class="wam-btn big">Iniciar envío</button>
       <button id="wam-pause" class="wam-btn alt">Pausar</button>
       <button id="wam-stop" class="wam-btn alt danger">Detener</button>
+    </div>
+    <div id="wam-foot-kw" class="wam-foot" hidden>
+      <button id="wam-kwstart" class="wam-btn">Iniciar</button>
+      <button id="wam-kwpause" class="wam-btn alt" disabled>Pausar</button>
     </div>
     <div id="wam-foot-ia" class="wam-foot" hidden>
       <div id="wam-hint-ia" class="wam-notice bad wam-span" hidden>Hay un envío masivo en curso: la IA no puede iniciarse hasta que termine o lo detengas. Solo puede funcionar una de las dos a la vez.</div>
@@ -375,7 +403,9 @@
     $('#wam-iahead').hidden = !enIa;
     panel.querySelectorAll('[data-body]').forEach((d) => (d.hidden = d.dataset.body !== view));
     if (view === 'met') renderMetrics();
-    if (view === 'iacfg') renderIaLabels();
+    if (view === 'kw') kwMount('kw');
+    if (view === 'iacfg') { kwMount('ia'); renderIaLabels(); }
+    $('#wam-foot-kw').hidden = view !== 'kw';
     if (enIa) { renderIaSug(); renderIaHuman(); }
     $('#wam-foot-bulk').hidden = !(view === 'env' || view === 'msg'); // botones del envío masivo
     $('#wam-foot-ia').hidden = !enIa; // botones de la IA
@@ -917,7 +947,7 @@
       const me = { number: await myNumber() };
       if (!me.number) { lic.reason = 'No se pudo leer tu número de WhatsApp. Inicia sesión en WhatsApp Web y recarga la página.'; lic.valid = false; return false; }
       lic.number = me.number;
-      fetchNotifs(); // avisos del administrador (no bloquea la validación)
+      fetchNotifs().catch(() => {}); // avisos del administrador (no bloquea la validación)
       const r = await fetchLicense(lic.token, lic.number);
       lic.detail = r.error
         ? 'Error de conexión: ' + r.error
@@ -1083,11 +1113,11 @@
     renderNotifs();
     return nueva;
   };
-  setTimeout(() => checkUpdate(), 4000);
-  setInterval(() => checkUpdate(), NOTIF_EVERY_MS);
+  setTimeout(() => checkUpdate().catch(() => {}), 4000);
+  setInterval(() => checkUpdate().catch(() => {}), NOTIF_EVERY_MS);
   $('#wam-avrefresh').onclick = () => { fetchNotifs(true); checkUpdate(); };
   $('#wam-avreadall').onclick = () => markRead(unreadList().map((n) => n.id));
-  setInterval(() => fetchNotifs(), NOTIF_EVERY_MS);
+  setInterval(() => fetchNotifs().catch(() => {}), NOTIF_EVERY_MS);
 
   // ---------- envío ----------
   const fmt = (s) => { s = Math.round(s); return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`; };
@@ -1315,6 +1345,8 @@
   let iaPausedDay = 0; // día en que el servidor avisó que se alcanzó el tope de consultas
   let iaEngaged = {}; // chatId -> true: conversaciones que la IA viene atendiendo (se continúan aunque ya no sean "nuevas")
   let iaSentT = {}; // chatId -> hora (segundos) del último mensaje enviado por la IA
+  let kwPasosT = {}; // igual que iaPasosT pero para las respuestas por palabra clave sin IA
+  let kwSeen = {}; // chatId -> hora (s) del último mensaje del cliente ya atendido por las respuestas por palabra clave
   let iaPasosT = {}; // 'palabra|chatId' -> cuándo (ms) se le enviaron los pasos de esa palabra (para no repetirlos enseguida)
   let iaPause = {}; // chatId -> hasta cuándo (ms) la IA se aparta porque una persona respondió
   const IA_PAUSE_MS = 24 * 3600 * 1000;
@@ -1356,9 +1388,9 @@
   // ----- palabras clave: la IA se activa en un chat cuando el cliente escribe alguna -----
   const iaNorm = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' '); // sin tildes, en minusculas y con espacios o saltos de linea repetidos como uno
   // lista de palabras claves tal como las escribió el usuario (sin repetidas, mínimo 2 letras); se guarda una por línea
-  const iaKwLista = () => {
+  const iaKwLista = (st) => {
     const vistas = new Set();
-    return String(cfg.ia.palabras || '').split(/[\n,;]+/).map((x) => x.trim()).filter((x) => {
+    return String((st || cfg.ia).palabras || '').split(/[\n,;]+/).map((x) => x.trim()).filter((x) => {
       if (x.length < 2) return false;
       const k = iaNorm(x);
       if (vistas.has(k)) return false;
@@ -1370,8 +1402,8 @@
   const iaEsc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   // ¿lo pendiente del cliente (sus mensajes desde la última respuesta del negocio) contiene una palabra clave? No distingue mayúsculas ni tildes. La palabra clave debe EMPEZAR una palabra del mensaje: «precio» encuentra «precio», «Precios» y «¿PRECIO?», pero no «aprecio» (a mitad de palabra).
   // devuelve la palabra clave (tal como la escribió el usuario) que aparece en lo pendiente del cliente, o '' si ninguna
-  const iaKwMatch = (c) => {
-    const lista = iaKwLista();
+  const iaKwMatch = (c, st) => {
+    const lista = iaKwLista(st);
     if (!lista.length) return '';
     const txt = [];
     for (let i = c.msgs.length - 1; i >= 0 && c.msgs[i].de === 'cliente'; i--) if (c.msgs[i].texto) txt.push(c.msgs[i].texto);
@@ -1388,7 +1420,7 @@
     const m = cfg.ia.modos;
     panel.querySelectorAll('#wam-iamodos input[data-modo]').forEach((i) => { i.checked = !!m[i.dataset.modo]; });
     // cada módulo solo funciona si su modalidad está activa: si no, queda bloqueado (y la IA no lo usa)
-    $('#wam-iakwbox').hidden = !m.palabras; // las palabras claves y sus pasos solo aparecen con el interruptor «Por palabras claves» encendido
+    $('#wam-kwslot-ia').hidden = !m.palabras; // las palabras claves y sus pasos solo aparecen con el interruptor «Por palabras claves» encendido
     $('#wam-ialabels-box').hidden = !m.etiquetas; // las etiquetas solo aparecen con el interruptor «Por etiquetas» encendido
     renderIaLabels();
     const nombres = { etiquetas: 'con las etiquetas elegidas', palabras: 'cuando un mensaje entrante tenga una palabra clave', todos: 'todos los chats individuales', nuevos: 'las conversaciones nuevas' };
@@ -1432,7 +1464,11 @@
   let iaKwSel = ''; // palabra clave (normalizada) seleccionada para editar sus pasos
   // un paso es { tipo: 'texto', texto } o { tipo: 'imagen', imgId, nombre, caption }; se aceptan los pasos antiguos (solo texto, como cadena)
   const iaPasoNorm = (x) => (x && typeof x === 'object' ? x : { tipo: 'texto', texto: String(x || '') });
-  const iaPasosObj = (nk) => (cfg.ia.pasos[nk] || (cfg.ia.pasos[nk] = { on: false, textos: [] }));
+  // el editor de palabras clave y pasos sirve a dos módulos: «Envío con IA» (cfg.ia) y «Envío Automático» (cfg.kw)
+  let kwCtx = 'ia';
+  const kwStore = () => (kwCtx === 'kw' ? cfg.kw : cfg.ia);
+  const kwPT = () => (kwCtx === 'kw' ? kwPasosT : iaPasosT);
+  const iaPasosObj = (nk) => (kwStore().pasos[nk] || (kwStore().pasos[nk] = { on: false, textos: [] }));
   // ----- imágenes de los pasos: se reducen y se guardan aparte (una clave por imagen) para no hacer pesada la configuración -----
   const iaImgCache = {};
   const iaImgKey = (id) => 'wamImg_' + id;
@@ -1478,21 +1514,21 @@
     }),
   };
   // pasos activos y completos de una palabra clave (texto con contenido o imagen ya elegida), o null
-  const iaPasosDe = (k) => {
-    const p = cfg.ia.pasos[iaNorm(k)];
+  const iaPasosDe = (k, st) => {
+    const p = (st || cfg.ia).pasos[iaNorm(k)];
     if (!p || !p.on) return null;
     const pasos = (p.textos || []).map(iaPasoNorm).filter((x) => (x.tipo === 'imagen' ? !!x.imgId : !!String(x.texto || '').trim()));
     return pasos.length ? { pasos } : null;
   };
   const renderIaPasos = () => {
     const box = $('#wam-iapasos');
-    const sel = iaKwLista().find((k) => iaNorm(k) === iaKwSel);
+    const sel = iaKwLista(kwStore()).find((k) => iaNorm(k) === iaKwSel);
     $('#wam-iapasos-vacio').hidden = !!sel;
     $('#wam-iapasos-cuerpo').hidden = !sel;
     if (!sel) return;
     const p = iaPasosObj(iaKwSel);
     p.textos = p.textos.map(iaPasoNorm);
-    $('#wam-iapasos-tit').textContent = 'Primeros pasos para «' + sel + '» (antes de que la IA responda)';
+    $('#wam-iapasos-tit').textContent = (kwCtx === 'ia' ? 'Primeros pasos para «' + sel + '» (antes de que la IA responda)' : 'Pasos para «' + sel + '»');
     $('#iaPasosOn').checked = !!p.on;
     const cont = $('#wam-iapasos-lista');
     cont.innerHTML = '';
@@ -1577,12 +1613,12 @@
     const cont = $('#wam-kwchips');
     const input = $('#iaKwInput');
     cont.querySelectorAll('.wam-chip').forEach((c) => c.remove());
-    iaKwLista().forEach((k, i) => {
+    iaKwLista(kwStore()).forEach((k, i) => {
       const nk = iaNorm(k);
       const chip = document.createElement('span');
       chip.className = 'wam-chip' + (iaKwSel === nk ? ' sel' : '');
       const t = document.createElement('span');
-      t.textContent = (iaPasosDe(k) ? '⚡ ' : '') + k;
+      t.textContent = (iaPasosDe(k, kwStore()) ? '⚡ ' : '') + k;
       t.title = 'Toca para configurar sus pasos';
       t.onclick = () => { iaKwSel = iaKwSel === nk ? '' : nk; renderIaKwChips(); };
       const x = document.createElement('a');
@@ -1594,37 +1630,37 @@
     });
     if (!sinPasos) renderIaPasos();
   };
-  const iaKwCambio = () => { save(); renderIaKwChips(); if (cfg.ia.on && cfg.ia.modos.palabras) iaScan(true); };
+  const iaKwCambio = () => { save(); renderIaKwChips(); if (kwCtx === 'ia' && cfg.ia.on && cfg.ia.modos.palabras) iaScan(true); };
   // agrega una o varias palabras (separadas por coma, punto y coma o salto de línea); devuelve true si agregó alguna nueva
   const iaKwAdd = (texto) => {
     const nuevas = String(texto || '').split(/[\n,;]+/).map((x) => x.trim()).filter((x) => x.length >= 2);
     if (!nuevas.length) return false;
-    const lista = iaKwLista();
+    const lista = iaKwLista(kwStore());
     const claves = new Set(lista.map(iaNorm));
     let agregadas = 0;
     nuevas.forEach((x) => {
       if (claves.has(iaNorm(x))) return;
       lista.push(x); claves.add(iaNorm(x)); agregadas++;
       const p = iaPasosObj(iaNorm(x));
-      if (!p.on && !iaPasosDe(x)) { p.on = true; p.textos = pasosDefecto(); } // una palabra nueva nace con los pasos activados: primero se envían y luego responde la IA
+      if (!p.on && !iaPasosDe(x, kwStore())) { p.on = true; p.textos = pasosDefecto(); } // una palabra nueva nace con los pasos activados: primero se envían y luego responde la IA
     });
     if (!agregadas) return false;
-    cfg.ia.palabras = lista.join('\n').slice(0, 2000);
+    kwStore().palabras = lista.join('\n').slice(0, 2000);
     iaKwSel = iaNorm(nuevas[nuevas.length - 1]); // se abre su panel de pasos para configurarlos enseguida
     iaKwCambio();
     return true;
   };
   const iaKwQuitar = (i) => {
-    const lista = iaKwLista();
+    const lista = iaKwLista(kwStore());
     const [quitada] = lista.splice(i, 1);
     if (quitada) {
-      const po = cfg.ia.pasos[iaNorm(quitada)];
+      const po = kwStore().pasos[iaNorm(quitada)];
       if (po && po.textos) po.textos.forEach(iaImgBorrarPaso); // sus imágenes guardadas también se borran
-      delete cfg.ia.pasos[iaNorm(quitada)];
-      Object.keys(iaPasosT).forEach((k) => { if (k.startsWith(iaNorm(quitada) + '|')) delete iaPasosT[k]; });
+      delete kwStore().pasos[iaNorm(quitada)];
+      Object.keys(kwPT()).forEach((k) => { if (k.startsWith(iaNorm(quitada) + '|')) delete kwPT()[k]; });
       if (iaKwSel === iaNorm(quitada)) iaKwSel = '';
     }
-    cfg.ia.palabras = lista.join('\n');
+    kwStore().palabras = lista.join('\n');
     iaKwCambio();
   };
   {
@@ -1635,7 +1671,7 @@
         iaKwAdd(kwIn.value);
         kwIn.value = '';
       } else if (e.key === 'Backspace' && !kwIn.value) { // con el cuadro vacío, Borrar quita la última
-        const l = iaKwLista();
+        const l = iaKwLista(kwStore());
         if (l.length) iaKwQuitar(l.length - 1);
       }
     };
@@ -1650,8 +1686,8 @@
     if (!iaKwSel) return;
     const p = iaPasosObj(iaKwSel);
     p.on = e.target.checked;
-    Object.keys(iaPasosT).forEach((k) => { if (k.startsWith(iaKwSel + '|')) delete iaPasosT[k]; }); // al apagar/encender los pasos se olvida a quién ya se enviaron (sirve para volver a probar)
-    if (p.on && !iaPasosDe(iaKwSel)) { p.textos.forEach(iaImgBorrarPaso); p.textos = pasosDefecto(); } // al activarlos por primera vez (sin pasos completos) se cargan los pasos por defecto
+    Object.keys(kwPT()).forEach((k) => { if (k.startsWith(iaKwSel + '|')) delete kwPT()[k]; }); // al apagar/encender los pasos se olvida a quién ya se enviaron (sirve para volver a probar)
+    if (p.on && !iaPasosDe(iaKwSel, kwStore())) { p.textos.forEach(iaImgBorrarPaso); p.textos = pasosDefecto(); } // al activarlos por primera vez (sin pasos completos) se cargan los pasos por defecto
     save(); renderIaKwChips();
   };
   $('#wam-iapaso-add').onclick = () => {
@@ -1664,10 +1700,24 @@
   $('#wam-iapaso-def').onclick = () => {
     if (!iaKwSel) return;
     const p = iaPasosObj(iaKwSel);
-    if (iaPasosDe(iaKwSel) && !confirm('Se reemplazarán los pasos actuales por los pasos por defecto. ¿Continuar?')) return;
+    if (iaPasosDe(iaKwSel, kwStore()) && !confirm('Se reemplazarán los pasos actuales por los pasos por defecto. ¿Continuar?')) return;
     p.textos.forEach(iaImgBorrarPaso);
     p.textos = pasosDefecto();
     save(); renderIaKwChips();
+  };
+  // mueve el editor de palabras clave al módulo indicado ('ia' o 'kw') y lo deja trabajando con sus datos
+  const KW_MORE_IA = "Escribe una palabra o frase y pulsa <b>Enter</b> para agregarla; toca la × para quitarla; <b>toca una palabra</b> para configurar sus pasos (⚡ = tiene pasos activos). No distingue mayúsculas, minúsculas ni tildes («PRECIO», «Precio» y «precio» son lo mismo), y detecta la palabra aunque lleve más letras al final: «precio» también encuentra «precios». Desde que se activa en un chat, el asistente sigue la conversación aunque el cliente ya no use la palabra.";
+  const KW_MORE_KW = 'Escribe una palabra o frase y pulsa Enter para agregarla; toca la × para quitarla; toca una palabra para configurar sus pasos (⚡ = tiene pasos activos). No distingue mayúsculas, minúsculas ni tildes, y detecta la palabra aunque lleve más letras al final («precio» también encuentra «precios»). Cada cliente recibe los pasos de una palabra como máximo una vez cada 12 horas.';
+  const kwMount = (ctx) => {
+    kwCtx = ctx;
+    iaKwSel = '';
+    const slot = $(ctx === 'kw' ? '#wam-kwslot-kw' : '#wam-kwslot-ia');
+    const box = $('#wam-iakwbox');
+    if (box.parentNode !== slot) slot.appendChild(box);
+    $('#wam-kwtitle').textContent = ctx === 'kw' ? 'Palabras claves para responder automáticamente' : 'Palabras claves para activar al asistente';
+    $('#wam-kwsw-small').textContent = ctx === 'kw' ? 'Cuando el cliente escriba esta palabra, se mandan estos pasos en orden, uno tras otro.' : 'Cuando el cliente escriba esta palabra, se mandan en orden estos primeros pasos; solo después la IA empieza a responder.';
+    $('#wam-kwmore-p').textContent = ctx === 'kw' ? KW_MORE_KW : KW_MORE_IA;
+    renderIaKwChips();
   };
   const iaSetModo = (clave, on) => {
     cfg.ia.modos[clave] = !!on;
@@ -1850,8 +1900,10 @@
   // los pasos de una palabra se envían a un chat una vez cada 12 h (aunque la IA ya lo estuviera atendiendo)
   const IA_PASOS_MS = 12 * 3600 * 1000;
   const iaPasosKey = (kw, chatId) => iaNorm(kw) + '|' + chatId;
-  const iaPasosRecientes = (kw, chatId) => Date.now() - (iaPasosT[iaPasosKey(kw, chatId)] || 0) < IA_PASOS_MS;
-  const iaEnviarPasos = async (chat, kw, pasos) => {
+  const iaPasosRecientes = (kw, chatId, mapa) => Date.now() - ((mapa || iaPasosT)[iaPasosKey(kw, chatId)] || 0) < IA_PASOS_MS;
+  // opts.engage=false: respuestas por palabra clave SIN IA (el chat no queda «en atención» de la IA ni va a su lista de personas)
+  const iaEnviarPasos = async (chat, kw, pasos, opts = {}) => {
+    const engage = opts.engage !== false;
     const vars = (t) => String(t || '').replace(/\{nombre\}/gi, chat.name || '').replace(/\{palabra\}/gi, kw).replace(/ +([,!.?])/g, '$1').replace(/[ \t]{2,}/g, ' ').trim();
     let enviados = 0;
     try {
@@ -1867,17 +1919,16 @@
           if (!t) continue;
           await call('send', { to: chat.id, text: t, typingMs: iaTyping(t) });
         }
-        iaSentT[chat.id] = Math.floor(Date.now() / 1000);
+        if (engage) iaSentT[chat.id] = Math.floor(Date.now() / 1000);
         enviados++;
         if (i < pasos.length - 1) await sleep(rnd(1500, 3000));
       }
       if (!enviados) return false; // no se envió ningún paso: el chat no queda en atención de la IA
-      iaEngaged[chat.id] = true;
-      iaPersist();
+      if (engage) { iaEngaged[chat.id] = true; iaPersist(); }
       log('✓ Pasos de «' + kw + '» enviados a ' + chat.name, 'ok');
       return true;
     } catch (e) {
-      iaAddHuman({ id: chat.id, name: chat.name }, 'No se pudieron enviar los pasos: ' + e.message, 0);
+      if (engage) iaAddHuman({ id: chat.id, name: chat.name }, 'No se pudieron enviar los pasos: ' + e.message, 0);
       log('✗ Pasos para ' + chat.name + ': ' + e.message, 'err');
       return false;
     }
@@ -2030,12 +2081,109 @@
   };
   window.addEventListener('message', (ev) => {
     const m = ev.data;
-    if (ev.source === window && m && m.tag === TAG && m.dir === 'evt' && m.event === 'new_message') iaKick(m.chatId);
+    if (ev.source === window && m && m.tag === TAG && m.dir === 'evt' && m.event === 'new_message') { iaKick(m.chatId); kwKick(m.chatId); }
   });
+
+  // ---------- Envío Automático: respuestas por palabra clave (sin IA) ----------
+  // Cuando un cliente escribe una palabra clave configurada, se le envían sus pasos (textos o imágenes) en orden. No usa IA.
+  const KW_MAX_AGE_S = 24 * 3600; // solo chats con mensaje del cliente de las últimas 24 h
+  const KW_HOLD_MS = 8000; // se detiene mientras editas y retoma unos segundos después del último cambio
+  let kwHoldUntil = 0, kwHoldTimer = null, kwBusy = false, kwKickT = null, kwKickIds = new Set();
+  const kwInFlight = new Set();
+  const kwEditando = () => Date.now() < kwHoldUntil;
+  const setKwStatus = (t) => { $('#wam-kwstatus').textContent = t; };
+  const kwPersist = () => {
+    const k = Object.keys(kwSeen);
+    if (k.length > 500) k.slice(0, k.length - 500).forEach((x) => delete kwSeen[x]);
+    chrome.storage.local.set({ wamKw: { seen: kwSeen, pasosT: kwPasosT } });
+  };
+  const kwCanRun = () => !!(cfg.kw.on && !kwEditando() && lic.valid && !cfg.ia.on);
+  const renderKwRun = () => {
+    const on = !!cfg.kw.on;
+    $('#wam-kwstart').disabled = on;
+    $('#wam-kwpause').disabled = !on;
+    $('#wam-kwstart').textContent = on ? 'En marcha' : 'Iniciar';
+    if (!on) setKwStatus('Apagado: no responde a palabras clave.');
+  };
+  const kwHold = () => {
+    if (!cfg.kw.on) return;
+    kwHoldUntil = Date.now() + KW_HOLD_MS;
+    setKwStatus('En pausa mientras editas. Retoma sola unos segundos después de tu último cambio.');
+    clearTimeout(kwHoldTimer);
+    kwHoldTimer = setTimeout(() => { kwHoldUntil = 0; if (cfg.kw.on) kwScan(true); }, KW_HOLD_MS + 100);
+  };
+  const kwScan = async (manual = false, onlyIds = null) => {
+    if (!kwCanRun()) return;
+    const full = !onlyIds;
+    if (full && kwBusy) return;
+    if (full) kwBusy = true;
+    try {
+      const st = await call('status');
+      if (!st.ready) return setKwStatus('Esperando a que WhatsApp termine de cargar…');
+      const cands = await call('iaCandidates', { scope: 'palabras', labelIds: [], limit: 120, maxAgeSec: full ? KW_MAX_AGE_S : 0, incluir: [], solo: onlyIds || undefined });
+      for (const c of cands) {
+        if (!kwCanRun()) break;
+        if (kwInFlight.has(c.id)) continue;
+        const last = c.msgs[c.msgs.length - 1];
+        if (!last || last.de !== 'cliente') continue; // ya respondió el negocio
+        if (Date.now() / 1000 - last.t > KW_MAX_AGE_S) continue;
+        if ((kwSeen[c.id] || 0) >= last.t) continue; // ya atendido
+        const kw = iaKwMatch(c, cfg.kw);
+        if (!kw) continue;
+        kwSeen[c.id] = last.t;
+        const paso = iaPasosDe(kw, cfg.kw);
+        if (!paso) { log('Palabra «' + kw + '» en ' + c.name + ': no tiene pasos activos'); continue; }
+        if (iaPasosRecientes(kw, c.id, kwPasosT)) { log('Palabra «' + kw + '» en ' + c.name + ': sus pasos ya se enviaron hace menos de 12 h'); continue; }
+        kwInFlight.add(c.id);
+        try {
+          if (await iaEnviarPasos({ id: c.id, name: c.name }, kw, paso.pasos, { engage: false })) kwPasosT[iaPasosKey(kw, c.id)] = Date.now();
+        } finally { kwInFlight.delete(c.id); }
+      }
+      kwPersist();
+      const hoy = iaDay();
+      setKwStatus('Activo · pasos enviados hoy: ' + Object.values(kwPasosT).filter((t) => dayKey(t) === hoy).length);
+    } catch (e) {
+      setKwStatus('Error: ' + e.message);
+    } finally {
+      if (full) kwBusy = false;
+    }
+  };
+  const kwKick = (chatId) => {
+    if (!kwCanRun()) return;
+    if (chatId) kwKickIds.add(String(chatId));
+    clearTimeout(kwKickT);
+    kwKickT = setTimeout(() => { const ids = [...kwKickIds]; kwKickIds = new Set(); kwScan(false, ids.length ? ids : null); }, 300);
+  };
+  const kwStart = () => {
+    if (cfg.kw.on) return;
+    if (cfg.ia.on) { setKwStatus('La IA está en marcha: pausa la IA para usar las respuestas por palabra clave. Solo puede funcionar una de las dos.'); return; }
+    if (!lic.valid) { setKwStatus('La licencia no está activa.'); return; }
+    if (!iaKwLista(cfg.kw).some((k) => iaPasosDe(k, cfg.kw))) { setKwStatus('Agrega al menos una palabra clave con pasos activos y completos.'); return; }
+    if (!confirm('Cuando un cliente escriba una de tus palabras clave, se le enviarán los pasos automáticamente. ¿Iniciar?')) return;
+    cfg.kw.on = true;
+    save();
+    renderKwRun();
+    setKwStatus('Iniciado. Revisando chats…');
+    kwScan(true);
+  };
+  const kwPause = () => {
+    if (!cfg.kw.on) return;
+    cfg.kw.on = false;
+    save();
+    renderKwRun();
+  };
+  $('#wam-kwstart').onclick = kwStart;
+  $('#wam-kwpause').onclick = kwPause;
+  setInterval(() => kwScan(false), IA_SCAN_MS);
+  ['input', 'change', 'click'].forEach((ev) => panel.querySelector('[data-body="kw"]').addEventListener(ev, (e) => {
+    if (ev === 'click' && !e.target.closest('#wam-iakwbox')) return;
+    kwHold();
+  }, true));
 
   // ----- controles -----
   const iaStart = () => {
     if (cfg.ia.on) return;
+    if (cfg.kw.on) { iaWarn('Las respuestas por palabra clave (Envío Automático) están en marcha: pausa primero esa función. Solo puede funcionar una de las dos.'); return; }
     if (run.state === 'running') { iaWarn('Hay un envío masivo en curso: espera a que termine o detenlo para iniciar la IA. Solo puede funcionar una de las dos a la vez.'); return; }
     if (!iaModosActivos().length) { iaWarn('Activa al menos una modalidad (por etiquetas, palabras claves, todos los chats…).'); return; }
     if (cfg.ia.modos.etiquetas && !cfg.ia.labels.length) { iaWarn('La modalidad «Por etiquetas» está activa: elige al menos una etiqueta (o apaga la modalidad).'); return; }
@@ -2110,6 +2258,7 @@
     if (Array.isArray(wamNotifs)) notifs = wamNotifs; // se muestran al instante, aunque no haya conexión
     renderNotifs();
   });
+  chrome.storage.local.get('wamKw').then(({ wamKw }) => { if (wamKw) { kwSeen = wamKw.seen || {}; kwPasosT = wamKw.pasosT || {}; } });
   chrome.storage.local.get('wamIa').then(({ wamIa }) => {
     if (!wamIa) return;
     iaSeen = wamIa.seen || {}; iaSug = []; iaHuman = Array.isArray(wamIa.human) ? wamIa.human : [];
@@ -2132,6 +2281,10 @@
     if (cfg.source !== 'excel') cfg.source = 'label';
     cfg.ia = { ...DEFAULTS.ia, ...(wamCfg && wamCfg.ia ? wamCfg.ia : {}) };
     cfg.ia.mode = 'auto'; // el modo sugerencia ya no existe
+    cfg.kw = { ...DEFAULTS.kw, ...(wamCfg && wamCfg.kw ? wamCfg.kw : {}) };
+    if (!cfg.kw.pasos || typeof cfg.kw.pasos !== 'object') cfg.kw.pasos = {};
+    if (typeof cfg.kw.palabras !== 'string') cfg.kw.palabras = '';
+    cfg.kw.on = !!cfg.kw.on;
     if (!Array.isArray(cfg.ia.labels)) cfg.ia.labels = [];
     if (iaMin(cfg.ia.inicio) === null) cfg.ia.inicio = '08:00';
     if (iaMin(cfg.ia.cierre) === null) cfg.ia.cierre = '20:00';
@@ -2146,6 +2299,7 @@
     if (typeof cfg.ia.instrAplicadas !== 'string') cfg.ia.instrAplicadas = cfg.ia.instrucciones || ''; // entrenamiento ya aplicado (versiones anteriores)
     cfg.ia.labels = cfg.ia.labels.map(String);
     syncIa();
+    renderKwRun();
     syncFields();
     applySource();
     renderPreview();
@@ -2156,7 +2310,7 @@
     try {
       const st = await call('status');
       setConn(st.ready);
-      if (st.ready) { clearInterval(poll); refreshData(); checkLicense().then(() => iaScan(false)); }
+      if (st.ready) { clearInterval(poll); refreshData(); checkLicense().then(() => iaScan(false)).catch(() => {}); }
       else if (!diagShown && Date.now() - t0 > 25000) {
         diagShown = true;
         log(`WhatsApp no termina de cargar la librería interna (WPP=${st.hasWPP}, isReady=${st.isReady}, isFullReady=${st.isFullReady}, inyectada=${st.injected}, cargador=${st.loaderType}, globales=[${st.has}], otras=[${st.keys}], WhatsApp Web ${st.waVersion || '?'}, librería ${st.version || '?'}). Recarga la página con Ctrl+Shift+R.`, 'err');
