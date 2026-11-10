@@ -1127,7 +1127,6 @@
     const total = run.total ?? recipients.length;
     $('#wam-stats').textContent = `${statsPrefix}Enviados ${run.sent} · Fallidos ${run.failed} · Total ${total}${extra ? ' — ' + extra : ''}`;
     $('#wam-barfill').style.width = total ? ((run.sent + run.failed) / total) * 100 + '%' : '0%';
-    $('#wam-iaprog').textContent = $('#wam-stats').textContent;
   };
 
   // espera interrumpible; devuelve false si se detuvo
