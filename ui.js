@@ -72,7 +72,6 @@
     hourFrom: 8,
     hourTo: 20,
     source: 'label',
-    cc: '',
     nums: '',
     ia: { on: false, mode: 'auto', scope: 'etiquetas', modos: { etiquetas: true, palabras: false, todos: false, nuevos: false, noLeidos: false }, pasos: {}, labels: [], instrucciones: '', maxDia: 100, horas: 0, instrAplicadas: '', horarioOn: true, inicio: '08:00', cierre: '20:00', palabras: '', kwExtra: false, consent: false },
     messages: [...EXAMPLE_MSGS],
@@ -162,19 +161,17 @@
           <div id="wam-lblsum" class="wam-hint"></div>
         </div>
         <div id="wam-pane-numeros" hidden>
-          <p class="wam-hint"><b>Por número (manual).</b> Escribe un número o varios separados por comas («,»). Puedes incluir el código de país o indicarlo abajo.</p>
+          <p class="wam-hint"><b>Por número (manual).</b> Escribe el número completo, con código de país (ej: 56912345678), o varios separados por comas («,»).</p>
           <textarea id="wam-nums" rows="3" placeholder="Ej: 56912345678, 573001234567, 5491122334455"></textarea>
-          <label>Código de país (opcional) <input type="number" id="wam-ncc" placeholder="56"></label>
           <div id="wam-nsum" class="wam-notice"></div>
         </div>
         <div id="wam-pane-excel" hidden>
-          <p class="wam-hint">Sube un Excel (.xlsx, .xls o .csv) con una columna de nombre y otra de teléfono. Las demás columnas sirven para personalizar el mensaje.</p>
+          <p class="wam-hint">Sube un Excel (.xlsx, .xls o .csv) con una columna de nombre y otra de teléfono (con el código de país, ej: 56912345678). Las demás columnas sirven para personalizar el mensaje.</p>
           <button id="wam-tpl" class="wam-btn alt">Descargar formato de ejemplo</button>
           <label class="wam-file"><input type="file" id="wam-file" accept=".xlsx,.xls,.csv"><span id="wam-filename">Elegir archivo…</span></label>
           <div id="wam-xmap" hidden>
             <label>Columna de nombre <select id="wam-colname"></select></label>
             <label>Columna de teléfono <select id="wam-colphone"></select></label>
-            <label>Código de país (opcional) <input type="number" id="wam-cc" placeholder="56"></label>
             <div id="wam-xsum" class="wam-notice"></div>
           </div>
         </div>
@@ -569,8 +566,6 @@
       const row = excel.rows[n];
       const rawPhone = excel.rawRows[n] ? excel.rawRows[n][excel.colPhone] : row[excel.colPhone];
       let digits = (typeof rawPhone === 'number' ? String(Math.round(rawPhone)) : String(rawPhone ?? '')).replace(/\D/g, '').replace(/^0+/, '');
-      const cc = String(cfg.cc || '');
-      if (cc && digits && digits.length <= 10 && !digits.startsWith(cc)) digits = cc + digits; // número local sin código de país
       if (digits.length < 8 || digits.length > 15) { invalid++; continue; }
       if (seen.has(digits)) { dup++; continue; }
       seen.add(digits);
@@ -590,16 +585,15 @@
   const buildNums = () => {
     const out = [], seen = new Set();
     let invalid = 0, dup = 0;
-    const cc = String(cfg.cc || '');
+    const malos = []; // lo que se escribió mal, para marcarlo como error
     String(cfg.nums || '').split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean).forEach((raw) => {
-      let digits = raw.replace(/\D/g, '').replace(/^0+/, '');
-      if (cc && digits && digits.length <= 10 && !digits.startsWith(cc)) digits = cc + digits; // número local sin código de país
-      if (digits.length < 8 || digits.length > 15) { invalid++; return; }
+      const digits = raw.replace(/\D/g, '').replace(/^0+/, '');
+      if (digits.length < 8 || digits.length > 15) { invalid++; malos.push(raw); return; }
       if (seen.has(digits)) { dup++; return; }
       seen.add(digits);
       out.push({ id: digits + '@c.us', name: '', vars: { nombre: '', telefono: digits } });
     });
-    numsStats = { valid: out.length, invalid, dup };
+    numsStats = { valid: out.length, invalid, dup, malos };
     return out;
   };
   // variables que se pueden usar en el mensaje según el origen elegido
@@ -615,8 +609,12 @@
     $('#wam-lblsum').textContent = selected.size
       ? `${selected.size} etiqueta(s): ${sum} contactos` + (sum !== recipients.length ? ` · ${recipients.length} en total sin repetir` : '')
       : '';
-    $('#wam-nsum').textContent = cfg.source === 'numeros' && numsStats
-      ? numsStats.valid + ' número(s) válido(s)' + (numsStats.invalid ? ' · ' + numsStats.invalid + ' no válido(s) (8 a 15 dígitos)' : '') + (numsStats.dup ? ' · ' + numsStats.dup + ' repetido(s)' : '')
+    const ns = cfg.source === 'numeros' ? numsStats : null;
+    $('#wam-nsum').hidden = !ns || (!ns.valid && !ns.invalid && !ns.dup);
+    $('#wam-nsum').className = 'wam-notice' + (ns && ns.invalid ? ' bad' : '');
+    $('#wam-nsum').textContent = ns
+      ? ns.valid + ' número(s) válido(s)' + (ns.dup ? ' · ' + ns.dup + ' repetido(s)' : '') +
+        (ns.invalid ? ' · ✗ ' + ns.invalid + ' con error (deben tener entre 8 y 15 dígitos, con código de país): ' + ns.malos.slice(0, 8).join(', ') + (ns.malos.length > 8 ? '…' : '') : '')
       : '';
     const st = excel.stats;
     $('#wam-xsum').textContent = st
@@ -664,7 +662,6 @@
     $('#wam-pane-numeros').hidden = cfg.source !== 'numeros';
     $('#wam-refresh').hidden = cfg.source !== 'label';
     $('#wam-nums').value = cfg.nums || '';
-    $('#wam-ncc').value = cfg.cc || '';
     rebuild();
   };
   panel.querySelectorAll('#wam-source button').forEach((b) => {
@@ -722,7 +719,6 @@
         opts($('#wam-colphone'), false);
         $('#wam-colname').value = colName;
         $('#wam-colphone').value = colPhone;
-        $('#wam-cc').value = cfg.cc || '';
         $('#wam-filename').textContent = file.name;
         $('#wam-xmap').hidden = false;
         if (colPhone < 0) log('No se encontró la columna de teléfono: elígela manualmente', 'err');
@@ -740,8 +736,6 @@
   $('#wam-colname').onchange = (e) => { excel.colName = +e.target.value; rebuild(); };
   $('#wam-colphone').onchange = (e) => { excel.colPhone = +e.target.value; rebuild(); };
   $('#wam-nums').oninput = (e) => { cfg.nums = e.target.value.slice(0, 20000); save(); rebuild(); };
-  $('#wam-ncc').onchange = (e) => { cfg.cc = e.target.value.replace(/\D/g, ''); e.target.value = cfg.cc; $('#wam-cc').value = cfg.cc; save(); rebuild(); };
-  $('#wam-cc').onchange = (e) => { cfg.cc = e.target.value.replace(/\D/g, ''); e.target.value = cfg.cc; save(); rebuild(); };
 
   // formato de ejemplo descargable
   $('#wam-tpl').onclick = () => {
@@ -819,12 +813,17 @@
       if (selected.has(lb.id)) rebuild();
     }
   };
+  let refreshTries = 0;
   const refreshData = async () => {
     try {
       const st = await call('status');
       setConn(st.ready);
       if (!st.ready) return;
       data = await call('getData');
+      // WhatsApp recién iniciado sincroniza las etiquetas poco a poco: si aún no hay ninguna con nombre, se reintenta unos minutos
+      if (!data.labels.length && refreshTries < 24) { refreshTries++; setTimeout(refreshData, 5000); if (refreshTries === 1) log('Esperando a que WhatsApp termine de cargar las etiquetas…'); }
+      else if (!data.labels.length) log('No se encontraron etiquetas (WhatsApp devolvió ' + (data.total || 0) + '). Requiere WhatsApp Business; pulsa «Actualizar» para reintentar.', 'err');
+      else refreshTries = 0;
       labelChats.clear();
       renderLabels();
       renderIaLabels();
@@ -834,7 +833,7 @@
       $('#wam-llist').textContent = 'Error: ' + e.message;
     }
   };
-  $('#wam-refresh').onclick = refreshData;
+  $('#wam-refresh').onclick = () => { refreshTries = 0; refreshData(); };
 
   // ---------- métricas (historial persistente en el almacenamiento de la extensión) ----------
   const MAX_LOG = 5000;

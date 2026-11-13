@@ -37,14 +37,16 @@
 
     async getData() {
       let labels = [];
+      let total = 0; // etiquetas que devolvió WhatsApp (aunque no tengan nombre todavía)
+      const mapear = (arr) => { total = arr.length; return arr.map((l) => ({ id: String(l.id), name: l.name || '', color: l.hexColor })).filter((l) => l.name); };
       try {
-        labels = (await WPP.labels.getAllLabels()).map((l) => ({ id: String(l.id), name: l.name, color: l.hexColor }));
+        labels = mapear(await WPP.labels.getAllLabels());
       } catch (e) {
-        try {
-          labels = WPP.whatsapp.LabelStore.getModelsArray().map((l) => ({ id: String(l.id), name: l.name, color: l.hexColor }));
-        } catch {}
+        try { labels = mapear(WPP.whatsapp.LabelStore.getModelsArray()); } catch {}
       }
-      return { labels };
+      // si getAllLabels no trajo nada con nombre, se prueba directo con el almacén de etiquetas
+      if (!labels.length) { try { const alt = mapear(WPP.whatsapp.LabelStore.getModelsArray()); if (alt.length) labels = alt; } catch {} }
+      return { labels, total };
     },
 
     // Chats (individuales y grupos) que tienen una etiqueta
