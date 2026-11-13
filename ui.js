@@ -71,7 +71,7 @@
     hoursOn: true,
     hourFrom: 8,
     hourTo: 20,
-    source: 'label',
+    source: 'numeros',
     nums: '',
     ia: { on: false, mode: 'auto', scope: 'etiquetas', modos: { etiquetas: true, palabras: false, todos: false, nuevos: false, noLeidos: false }, pasos: {}, labels: [], instrucciones: '', maxDia: 100, horas: 0, instrAplicadas: '', horarioOn: true, inicio: '08:00', cierre: '20:00', palabras: '', kwExtra: false, consent: false },
     messages: [...EXAMPLE_MSGS],
@@ -665,8 +665,13 @@
     rebuild();
   };
   panel.querySelectorAll('#wam-source button').forEach((b) => {
-    b.onclick = () => {
+    b.onclick = async () => {
       if (b.dataset.src === cfg.source) return;
+      if (b.dataset.src !== 'numeros' && !lic.valid && !(lic.token && (await checkLicense()))) {
+        if (!lic.reason) lic.reason = 'Para enviar por etiquetas o por Excel necesitas una licencia. El envío manual por número y las palabras clave son gratis.';
+        gateOpen = true; renderLic();
+        return;
+      }
       if ((selected.size || excel.rows.length || String(cfg.nums || '').trim()) && !confirm('Cambiar de origen quitará la selección actual. ¿Continuar?')) return;
       excluded.clear();
       clearLabels();
@@ -933,17 +938,17 @@
 
   const renderLic = () => {
     const st = $('#wam-licstat');
-    st.textContent = !lic.token ? 'Sin licencia' : lic.checking ? 'Verificando…' : lic.valid ? 'Licencia hasta ' + lic.until : 'Licencia no válida';
-    st.className = lic.valid ? 'ok' : 'bad';
+    st.textContent = !lic.token ? 'Versión gratuita' : lic.checking ? 'Verificando…' : lic.valid ? 'Licencia hasta ' + lic.until : 'Licencia no válida';
+    st.className = lic.valid || !lic.token ? 'ok' : 'bad';
     $('#wam-num').textContent = lic.number ? '+' + lic.number : 'no disponible aún';
     $('#wam-aboutnum').textContent = lic.number ? '+' + lic.number : 'no disponible aún';
     if (!$('#wam-token').value) $('#wam-token').value = lic.token;
     $('#wam-gate-msg').textContent = lic.checking ? 'Verificando licencia…' : lic.reason || 'Ingresa el token de tu licencia.';
     $('#wam-gate-msg').className = 'wam-notice' + (lic.reason && !lic.checking ? ' bad' : '');
     $('#wam-gate-detail').textContent = lic.detail || '';
-    $('#wam-gate').hidden = lic.valid && !gateOpen;
-    $('#wam-gate-close').hidden = !lic.valid;
-    $('#wam-start').disabled = !lic.valid || !!(cfg.ia && cfg.ia.on);
+    $('#wam-gate').hidden = !gateOpen; // solo se muestra cuando la persona quiere activar una licencia o usa algo que la requiere
+    $('#wam-gate-close').hidden = false;
+    $('#wam-start').disabled = !!(cfg.ia && cfg.ia.on);
     renderIaAcceso();
   };
   // la pestaña IA solo existe para las licencias que el administrador habilitó para el asistente con IA
@@ -1259,7 +1264,12 @@
       setStats(msg);
       return;
     }
-    if (!(await checkLicense())) { gateOpen = true; renderLic(); return log(lic.reason || 'Licencia no válida', 'err'); }
+    const requiereLic = (resume === true && job ? job.source : cfg.source) !== 'numeros'; // el envío manual por número es gratis
+    if (requiereLic && !(await checkLicense())) {
+      if (!lic.reason) lic.reason = 'Para enviar por etiquetas o por Excel necesitas una licencia. El envío manual por número y las palabras clave son gratis.';
+      gateOpen = true; renderLic();
+      return log(lic.reason || 'Licencia no válida', 'err');
+    }
     if (resume !== true) {
       if (!recipients.length) return log('No hay destinatarios', 'err');
       if (cfg.source === 'excel' && !excel.rows.length) return log('Carga primero un archivo Excel', 'err');
@@ -1302,7 +1312,7 @@
 
     for (let i = 0; i < queue.length; i++) {
       if (run.stop) break;
-      if (Date.now() - lastLic > 30 * 60 * 1000) {
+      if (requiereLic && Date.now() - lastLic > 30 * 60 * 1000) {
         lastLic = Date.now();
         if (!(await checkLicense())) { log('Envío detenido: ' + (lic.reason || 'licencia no válida'), 'err'); break; }
       }
@@ -1793,7 +1803,7 @@
     $('#wam-iastart').disabled = on || masivo;
     $('#wam-iastart').textContent = on ? 'IA en marcha' : 'Iniciar IA';
     $('#wam-iapause').disabled = !on;
-    $('#wam-start').disabled = !lic.valid || on; // envío masivo bloqueado mientras la IA está en marcha
+    $('#wam-start').disabled = on; // envío masivo bloqueado mientras la IA está en marcha
     $('#wam-hint-bulk').hidden = !on;
     $('#wam-hint-ia').hidden = !masivo;
   };
@@ -1951,7 +1961,7 @@
     let enviados = 0;
     try {
       for (let i = 0; i < pasos.length; i++) {
-        if (!lic.valid) break;
+        if (engage && !lic.valid) break; // las respuestas por palabra clave sin IA no requieren licencia
         const paso = iaPasoNorm(pasos[i]);
         if (paso.tipo === 'imagen') {
           const dataUrl = await iaImgCargar(paso.imgId);
@@ -2140,7 +2150,7 @@
     if (k.length > 500) k.slice(0, k.length - 500).forEach((x) => delete kwSeen[x]);
     chrome.storage.local.set({ wamKw: { seen: kwSeen, pasosT: kwPasosT } });
   };
-  const kwCanRun = () => !!(cfg.kw.on && !kwEditando() && lic.valid && !cfg.ia.on);
+  const kwCanRun = () => !!(cfg.kw.on && !kwEditando() && !cfg.ia.on); // gratis: no requiere licencia
   const renderKwRun = () => {
     const on = !!cfg.kw.on;
     $('#wam-kwstart').disabled = on;
@@ -2200,7 +2210,6 @@
   const kwStart = () => {
     if (cfg.kw.on) return;
     if (cfg.ia.on) { setKwStatus('La IA está en marcha: pausa la IA para usar las respuestas por palabra clave. Solo puede funcionar una de las dos.'); return; }
-    if (!lic.valid) { setKwStatus('La licencia no está activa.'); return; }
     if (!iaKwLista(cfg.kw).some((k) => iaPasosDe(k, cfg.kw))) { setKwStatus('Agrega al menos una palabra clave con pasos activos y completos.'); return; }
     if (!confirm('Cuando un cliente escriba una de tus palabras clave, se le enviarán los pasos automáticamente. ¿Iniciar?')) return;
     cfg.kw.on = true;
@@ -2321,7 +2330,7 @@
       cfg.messages = Array.isArray(backup) && backup.some((m) => String(m).trim() && m !== OLD_DEFAULT_MSG) ? backup : [...EXAMPLE_MSGS];
       save();
     }
-    if (cfg.source !== 'excel' && cfg.source !== 'numeros') cfg.source = 'label';
+    if (!['label', 'excel', 'numeros'].includes(cfg.source)) cfg.source = 'numeros';
     if (typeof cfg.nums !== 'string') cfg.nums = '';
     cfg.ia = { ...DEFAULTS.ia, ...(wamCfg && wamCfg.ia ? wamCfg.ia : {}) };
     cfg.ia.mode = 'auto'; // el modo sugerencia ya no existe
