@@ -75,7 +75,7 @@
       dir = h;
       await dbSet(h);
       mostrarCarpeta();
-      log('Carpeta lista. Pulsa «Sincronizar ahora».', 'ok');
+      log('Carpeta lista. Pulsa «Actualizar ahora».', 'ok');
     } catch (e) {
       if (e && e.name !== 'AbortError') log('No se pudo abrir la carpeta: ' + e.message, 'err');
     }
@@ -112,7 +112,7 @@
       // manifest.json al final: la versión nueva solo "existe" cuando ya están todos los demás archivos
       bajados.sort((a, b) => (a.ruta === 'manifest.json') - (b.ruta === 'manifest.json'));
       for (const f of bajados) { await escribirLocal(dir, f.ruta, f.buf); log('✓ ' + f.ruta, 'ok'); }
-      log('Sincronizado. Recargando la extensión… después recarga WhatsApp Web (Ctrl+Shift+R).', 'ok');
+      log('Actualizado. Recargando la extensión… después recarga WhatsApp Web (Ctrl+Shift+R).', 'ok');
       setTimeout(() => chrome.runtime.reload(), 1800);
     } catch (e) {
       log('✗ ' + e.message, 'err');
@@ -125,6 +125,6 @@
   (async () => {
     try { dir = await dbGet(); } catch {}
     mostrarCarpeta();
-    if (dir) log('Carpeta recordada. Pulsa «Sincronizar ahora» (Chrome puede pedirte confirmar el permiso).');
+    if (dir) log('Carpeta recordada. Pulsa «Actualizar ahora» (Chrome puede pedirte confirmar el permiso).');
   })();
 })();
