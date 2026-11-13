@@ -118,6 +118,8 @@
         <button id="wam-activate" class="wam-btn">Activar</button>
         <button id="wam-gate-close" class="wam-btn alt" hidden>Cerrar</button>
         <div id="wam-gate-msg" class="wam-notice">Ingresa el token de tu licencia.</div>
+        <a id="wam-support" class="wam-btn alt" href="#" target="_blank" rel="noopener noreferrer">Solicitar licencia por WhatsApp</a>
+        <p class="wam-hint">Soporte por WhatsApp: <b>+58 412-2837925</b></p>
         <div id="wam-gate-detail" class="wam-hint"></div>
       </div>
     </div>
@@ -932,10 +934,18 @@
   };
   const GRACE_MS = 24 * 3600 * 1000; // sin conexión: se tolera hasta 24 h desde la última verificación correcta
   const todayStr = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
-  let lic = { token: '', valid: false, ia: false, until: '', number: '', checkedAt: 0, reason: '', detail: '', checking: false };
+  let lic = { token: '', valid: false, ia: false, motivo: '', until: '', number: '', checkedAt: 0, reason: '', detail: '', checking: false };
   let gateOpen = false;
   const saveLic = () => chrome.storage.local.set({ wamLic: { token: lic.token, valid: lic.valid, ia: lic.ia, until: lic.until, number: lic.number, checkedAt: lic.checkedAt } });
 
+  // Soporte por WhatsApp: el mensaje cambia según el caso (licencia vencida, otro problema o pedir una licencia)
+  const SOPORTE_TEL = '584122837925';
+  const mensajeSoporte = () => {
+    const num = lic.number ? ' Mi número de WhatsApp: +' + lic.number + '.' : '';
+    if (lic.token && lic.motivo === 'licencia_vencida') return { texto: 'Renovar mi licencia por WhatsApp', msg: 'Hola, mi licencia de Creatuchat está vencida' + (lic.until ? ' (venció el ' + lic.until + ')' : '') + '. Quisiera renovarla.' + num };
+    if (lic.token && lic.motivo) return { texto: 'Pedir ayuda con mi licencia por WhatsApp', msg: 'Hola, tengo un problema con mi licencia de Creatuchat: ' + (LIC_REASONS[lic.motivo] || lic.motivo) + num };
+    return { texto: 'Solicitar licencia por WhatsApp', msg: 'Hola, quiero solicitar una licencia de Creatuchat.' + num };
+  };
   const renderLic = () => {
     const st = $('#wam-licstat');
     st.textContent = !lic.token ? 'Versión gratuita' : lic.checking ? 'Verificando…' : lic.valid ? 'Licencia hasta ' + lic.until : 'Licencia no válida';
@@ -946,6 +956,9 @@
     $('#wam-gate-msg').textContent = lic.checking ? 'Verificando licencia…' : lic.reason || 'Ingresa el token de tu licencia.';
     $('#wam-gate-msg').className = 'wam-notice' + (lic.reason && !lic.checking ? ' bad' : '');
     $('#wam-gate-detail').textContent = lic.detail || '';
+    const sop = mensajeSoporte();
+    $('#wam-support').textContent = sop.texto;
+    $('#wam-support').href = 'https://wa.me/' + SOPORTE_TEL + '?text=' + encodeURIComponent(sop.msg);
     $('#wam-gate').hidden = !gateOpen; // solo se muestra cuando la persona quiere activar una licencia o usa algo que la requiere
     $('#wam-gate-close').hidden = false;
     $('#wam-start').disabled = !!(cfg.ia && cfg.ia.on);
@@ -1007,9 +1020,9 @@
         : 'Respuesta del servidor: HTTP ' + r.status + (r.data && r.data.motivo ? ' · ' + r.data.motivo : '') + (r.data && r.data.valida ? ' · válida' : '');
       if (r.status === 200 && r.data) {
         if (r.data.valida) {
-          lic.valid = true; lic.ia = r.data.ia === true; lic.until = r.data.fecha_vencimiento || ''; lic.reason = ''; lic.checkedAt = Date.now();
+          lic.valid = true; lic.motivo = ''; lic.ia = r.data.ia === true; lic.until = r.data.fecha_vencimiento || ''; lic.reason = ''; lic.checkedAt = Date.now();
         } else {
-          lic.valid = false; lic.ia = false; lic.reason = LIC_REASONS[r.data.motivo] || 'Licencia no válida.';
+          lic.valid = false; lic.ia = false; lic.motivo = r.data.motivo || ''; lic.reason = LIC_REASONS[r.data.motivo] || 'Licencia no válida.';
           forzarManual(lic.reason);
         }
       } else if (r.status === 400) {
