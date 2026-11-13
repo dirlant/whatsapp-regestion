@@ -984,8 +984,17 @@
   };
 
   // Verifica la licencia contra la API. Devuelve true si se puede usar la extensión.
+  // Sin licencia válida (vencida, revocada, otro número o sin token) solo queda el envío Manual, que es gratis:
+  // si estaba elegido otro origen se pasa a Manual. No se llama cuando solo falla la conexión (ahí no se sabe si la licencia sirve).
+  const forzarManual = (motivo) => {
+    if (cfg.source === 'numeros') return;
+    excluded.clear(); clearLabels(); clearExcel();
+    cfg.source = 'numeros';
+    save(); applySource();
+    log(motivo + ' Se pasó al envío Manual, que es gratis.', 'err');
+  };
   const checkLicense = async () => {
-    if (!lic.token) { lic.valid = false; lic.reason = ''; renderLic(); return false; }
+    if (!lic.token) { lic.valid = false; lic.reason = ''; renderLic(); forzarManual('Sin licencia: las etiquetas y el Excel la necesitan.'); return false; }
     lic.checking = true; renderLic();
     try {
       const me = { number: await myNumber() };
@@ -1001,6 +1010,7 @@
           lic.valid = true; lic.ia = r.data.ia === true; lic.until = r.data.fecha_vencimiento || ''; lic.reason = ''; lic.checkedAt = Date.now();
         } else {
           lic.valid = false; lic.ia = false; lic.reason = LIC_REASONS[r.data.motivo] || 'Licencia no válida.';
+          forzarManual(lic.reason);
         }
       } else if (r.status === 400) {
         lic.valid = false; lic.reason = 'Falta el token o el número.';
