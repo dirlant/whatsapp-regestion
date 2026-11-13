@@ -152,9 +152,9 @@
       <h4>Destinatarios</h4>
       <div class="wam-card">
         <div class="wam-seg" id="wam-source">
+          <button data-src="numeros" title="Por número (manual)">Manual</button>
           <button data-src="label" class="on">Por etiqueta</button>
           <button data-src="excel">Por Excel</button>
-          <button data-src="numeros" title="Por número (manual)">Manual</button>
         </div>
         <div id="wam-pane-label">
           <div id="wam-llist" class="wam-list"></div>
@@ -1034,6 +1034,7 @@
   let updNotif = null;
   const REPO_URL = 'https://github.com/dirlant/whatsapp-regestion';
   const ZIP_URL = REPO_URL + '/archive/refs/heads/main.zip';
+  const REPO_URL_APP = 'https://github.com/dirlant/creatuchat-desktop';
   const allNotifs = () => (updNotif ? [updNotif, ...notifs] : notifs);
   const unreadList = () => allNotifs().filter((n) => !isRead(n));
   const safeUrl = (u) => (/^https?:\/\//i.test(String(u || '')) ? String(u) : '');
@@ -1086,7 +1087,7 @@
       const url = safeUrl(n.link);
       if (url) {
         const l = document.createElement('a');
-        l.href = url; l.target = '_blank'; l.rel = 'noopener noreferrer'; l.textContent = String(n.id).startsWith('upd-') ? 'Descargar actualización' : 'Abrir enlace';
+        l.href = url; l.target = '_blank'; l.rel = 'noopener noreferrer'; l.textContent = String(n.id).startsWith('upd-') ? ((chrome.runtime.getManifest() || {}).desktop ? 'Ver novedades' : 'Descargar actualización') : 'Abrir enlace';
         card.appendChild(l);
       }
       if (!leido) {
@@ -1145,7 +1146,11 @@
     const r = await new Promise((resolve) => chrome.runtime.sendMessage({ type: 'wam-update' }, (x) => resolve(x || {})));
     const actual = chrome.runtime.getManifest().version;
     const nueva = r.version && verMayor(r.version, actual) ? r.version : '';
-    updNotif = nueva ? { id: 'upd-' + nueva, tipo: 'importante', titulo: 'Nueva actualización', mensaje: 'Hay una nueva versión de Creatuchat (' + nueva + '; tienes la ' + actual + '). Pulsa «Sincronizar» (arriba) para actualizar los archivos desde GitHub, o descarga el ZIP con el enlace de abajo.', link: ZIP_URL, fecha: new Date().toISOString(), leida: false } : null;
+    const esApp = !!(chrome.runtime.getManifest() || {}).desktop; // app de escritorio: se actualiza sola desde GitHub Releases
+    const detalle = esApp
+      ? 'Pulsa «Sincronizar» (arriba): se descarga e instala sola y la app se reinicia. Tu sesión de WhatsApp y tu configuración se conservan.'
+      : 'Pulsa «Sincronizar» (arriba) para actualizar los archivos desde GitHub, o descarga el ZIP con el enlace de abajo.';
+    updNotif = nueva ? { id: 'upd-' + nueva, tipo: 'importante', titulo: 'Nueva actualización', mensaje: 'Hay una nueva versión de Creatuchat (' + nueva + '; tienes la ' + actual + '). ' + detalle, link: esApp ? REPO_URL_APP + '/releases/latest' : ZIP_URL, fecha: new Date().toISOString(), leida: false } : null;
     const dl = $('#wam-dl');
     dl.classList.toggle('nuevo', !!nueva);
     dl.title = nueva ? 'Nueva actualización disponible (' + nueva + '): pulsa Sincronizar' : 'Sincronizar: actualiza los archivos de la extensión desde GitHub';
